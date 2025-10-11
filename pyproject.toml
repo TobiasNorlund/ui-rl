@@ -1,0 +1,9 @@
+[project]
+name = "ui-rl"
+version = "0.1.0"
+description = "RL Finetuning for Computer Use models"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "kubernetes>=34.1.0",
+]
