@@ -5,16 +5,12 @@ An attempt to RL fine-tune Computer Use models
 
 ## How to run
 
-```python
+```bash
+# 1. Setup kubctl
+gcloud container clusters get-credentials simple-data-entry-cluster --region=europe-north2
+ 
+# 2. Deploy the ui-verifiers proxy server
 
-# During training, generate a batch of rollouts:
-rollouts = cua_rollout(
-    model=..., 
-    reward_fn=...,
-    new_session_fn=...
-    n=...
-)
-
-# In cua_rollout, we create n k10n pods, each represented as a CUASession
-# 
+# 3. Run demo script
+uv run -m ui_rl.main
 ```

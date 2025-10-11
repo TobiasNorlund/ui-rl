@@ -1,10 +1,9 @@
 import multiprocessing as mp
 import enum
-from operator import rshift
 import requests
-import logging
 import io
 import uuid
+import logging
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import List, Callable, Dict
@@ -61,6 +60,7 @@ ActionPredictionInput = namedtuple("ActionPredictionInput", ["rollout", "result_
 def run_cua_session(
     pod_manifest_fn: Callable,
     cua_inference_queue: mp.Queue,
+    rollout_queue: mp.Queue,
     reward_fn: Callable,
     cluster_host: str,
     max_steps: int = 10,
@@ -114,6 +114,9 @@ def run_cua_session(
         # Compute reward
         progress = _get_progress(cluster_host, session_id)
         rollout.reward = reward_fn(progress)
+
+        # Put finished rollout to output 
+        rollout_queue.put(rollout)
 
         log("Finished successfully")
     except Exception as e:
