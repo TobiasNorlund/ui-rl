@@ -9,11 +9,12 @@ An attempt to RL fine-tune Computer Use models
 
 # During training, generate a batch of rollouts:
 rollouts = cua_rollout(
-    model=model, 
-    task=SimpleDataEntry(), # Wraps reward function and CUASession construction 
-    n=1000
+    model=..., 
+    reward_fn=...,
+    new_session_fn=...
+    n=...
 )
 
 # In cua_rollout, we create n k10n pods, each represented as a CUASession
-
+# 
 ```
