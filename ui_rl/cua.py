@@ -60,12 +60,11 @@ ActionPredictionInput = namedtuple("ActionPredictionInput", ["rollout", "result_
 def run_cua_session(
     pod_manifest_fn: Callable,
     cua_inference_queue: mp.Queue,
-    rollout_queue: mp.Queue,
     reward_fn: Callable,
     cluster_host: str,
     max_steps: int = 10,
     session_timeout: int = 60 * 5  # Timeout in seconds for session to come online
-):
+) -> Rollout:
     """
     Launches a session pod, awaits it ready, and executes a Computer Use agent in it.
     """
@@ -115,10 +114,8 @@ def run_cua_session(
         progress = _get_progress(cluster_host, session_id)
         rollout.reward = reward_fn(progress)
 
-        # Put finished rollout to output 
-        rollout_queue.put(rollout)
-
         log("Finished successfully")
+        return rollout
     except Exception as e:
         log(f"Failed to delete pod {pod_name}: {e}", logging.ERROR)
     finally:

@@ -1,6 +1,7 @@
 import logging
 import random
 import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from time import sleep
 from .simple_data_entry import simple_data_entry_pod_manifest, reward_fn
 from .cua import run_cua_session, Action, ActionType
@@ -21,7 +22,7 @@ def inference_worker(inference_queue: mp.Queue):
     logging.info("Received sentinel, exiting inference worker")
 
 
-def main():
+def main(cluster_host: str):
     """
     This demo launches a simple-data-entry session pod, and generates a rollout
     using a mocked CUA inference model
@@ -29,39 +30,43 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     
-    inference_queue = mp.Queue()
-    inference_proc = mp.Process(
-        target=inference_worker,
-        args=(inference_queue,)
-    )
-    inference_proc.start()
+    with mp.Manager() as manager:
+        # Start inference worker
+        inference_queue = manager.Queue()
+        inference_proc = mp.Process(
+            target=inference_worker,
+            args=(inference_queue,)
+        )
+        inference_proc.start()
 
-    rollout_queue = mp.Queue()
-    session_proc = mp.Process(
-        target=run_cua_session,
-        kwargs={
-            "pod_manifest_fn": simple_data_entry_pod_manifest,
-            "cua_inference_queue": inference_queue,
-            "rollout_queue": rollout_queue,
-            "reward_fn": reward_fn,
-            "cluster_host": "34.51.245.237",
-            "max_steps": 10
-        }
-    )
-    # Start CUA session
-    session_proc.start()
+        with ProcessPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(
+                    run_cua_session, 
+                    pod_manifest_fn=simple_data_entry_pod_manifest,
+                    cua_inference_queue=inference_queue,
+                    reward_fn=reward_fn,
+                    cluster_host=cluster_host,
+                    max_steps=10
+                )
+                for _ in range(3)
+            ]
 
-    # Wait until we get a finished rollout
-    rollout = rollout_queue.get()
+            # Collect rollouts
+            for future in as_completed(futures):
+                if err := future.exception():
+                    logging.error(err)
+                else:
+                    logging.info(future.result())
 
-    # Join processes and clean up
-    session_proc.join()
-    inference_queue.put(None)
-    inference_proc.join()
-
-    # Print final result
-    print(rollout)
+        # Close inference worker
+        inference_queue.put(None)
+        inference_proc.join()
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("cluster_host")
+    args = parser.parse_args()
+    main(args.cluster_host)
