@@ -6,5 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "kubernetes>=34.1.0",
+    "peft>=0.17.1",
     "pillow>=11.3.0",
+    "trl>=0.23.1",
 ]
