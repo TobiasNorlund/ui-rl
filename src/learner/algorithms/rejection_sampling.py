@@ -53,7 +53,7 @@ class RejectionSampling(Algorithm):
 
         conversations = self._build_conversations(images, prompts, generated_texts)
         full_texts = self._render_conversations(model, conversations)
-        labels = self._tokenize_conversations(model, full_texts)
+        labels = self._tokenize_conversations(model, images, full_texts)
 
         model_outputs = model(
             images=batch['images'],  # List[PIL.Image]
@@ -124,6 +124,7 @@ class RejectionSampling(Algorithm):
     def _tokenize_conversations(
         self,
         model: nn.Module,
+        images: List[Any],
         full_texts: List[str]
     ) -> torch.Tensor:
         """
@@ -131,14 +132,16 @@ class RejectionSampling(Algorithm):
         only the assistant portion of each message.
         """
         tokenizer = getattr(model, "tokenizer", None)
+        processor = getattr(model, "processor", None)
         if tokenizer is None:
             raise AttributeError("Model must expose a tokenizer for label construction.")
+        if processor is None:
+            raise AttributeError("Model must expose a processor to align labels with input IDs.")
 
         try:
             encoded = tokenizer(
                 full_texts,
                 add_special_tokens=True,
-                padding=True,
                 truncation=True,
                 return_offsets_mapping=True,
             )
@@ -148,19 +151,28 @@ class RejectionSampling(Algorithm):
                 "which is required to build supervision masks for assistant tokens."
             ) from exc
 
-        input_ids_list = encoded["input_ids"]
+        text_input_ids_list = encoded["input_ids"]
         offsets_list = encoded["offset_mapping"]
 
-        batch_size = len(input_ids_list)
-        max_length = max(len(ids) for ids in input_ids_list) if input_ids_list else 0
+        processor_outputs = processor(
+            text=full_texts,
+            images=images,
+            return_tensors="pt",
+            padding=True,
+        )
+        processor_input_ids = processor_outputs["input_ids"].cpu()
+
+        if processor_input_ids.dim() != 2:
+            raise ValueError("Processor input IDs must be a 2D tensor (batch, seq_len).")
+
         labels = torch.full(
-            (batch_size, max_length),
+            processor_input_ids.shape,
             fill_value=-100,
             dtype=torch.long,
         )
 
-        for idx, (full_text, input_ids, offsets) in enumerate(
-            zip(full_texts, input_ids_list, offsets_list)
+        for idx, (full_text, text_input_ids, offsets) in enumerate(
+            zip(full_texts, text_input_ids_list, offsets_list)
         ):
             assistant_spans = self._extract_assistant_spans(full_text)
             if not assistant_spans:
@@ -169,22 +181,61 @@ class RejectionSampling(Algorithm):
                 )
                 assistant_spans = [(0, len(full_text))]
 
-            label_row = torch.tensor(input_ids, dtype=torch.long)
-            mask = torch.zeros(len(input_ids), dtype=torch.bool)
+            processor_ids_row = processor_input_ids[idx]
+            label_row = labels[idx]
 
-            for token_index, (start_char, end_char) in enumerate(offsets):
-                if end_char <= start_char:
-                    continue  # Skip special tokens or padding with zero-length offsets
+            text_cursor = 0
 
-                for span_start, span_end in assistant_spans:
-                    if start_char < span_end and end_char > span_start:
-                        mask[token_index] = True
+            for token_index, token_id in enumerate(processor_ids_row.tolist()):
+                # Skip ahead in text tokens until we find a valid span (non-zero length)
+                while text_cursor < len(text_input_ids):
+                    start_char, end_char = offsets[text_cursor]
+                    if end_char > start_char:
                         break
+                    text_cursor += 1
 
-            label_row[~mask] = -100
-            labels[idx, : len(input_ids)] = label_row
+                if text_cursor >= len(text_input_ids):
+                    break  # Remaining processor tokens are padding/image tokens
 
-        return labels.to(next(model.parameters()).device)
+                expected_token_id = text_input_ids[text_cursor]
+                if token_id != expected_token_id:
+                    # Processor may inject image tokens or additional special tokens
+                    continue
+
+                start_char, end_char = offsets[text_cursor]
+                supervise_token = any(
+                    start_char < span_end and end_char > span_start
+                    for span_start, span_end in assistant_spans
+                )
+
+                if supervise_token:
+                    label_row[token_index] = token_id
+
+                text_cursor += 1
+
+            if text_cursor < len(text_input_ids):
+                logger.warning(
+                    "Did not consume all text tokens when aligning labels "
+                    f"(conversation index {idx}). Remaining tokens will be ignored."
+                )
+
+            supervised_mask = label_row != -100
+            supervised_ids = label_row[supervised_mask].tolist()
+            if supervised_ids:
+                supervised_tokens = tokenizer.convert_ids_to_tokens(supervised_ids)
+                supervised_text = tokenizer.decode(
+                    supervised_ids,
+                    skip_special_tokens=False,
+                )
+            else:
+                supervised_tokens = []
+                supervised_text = ""
+
+            logger.info("Assistant labels[%d] tokens: %s", idx, supervised_tokens)
+            logger.info("Assistant labels[%d] text: %s", idx, supervised_text)
+
+        device = next(model.parameters()).device
+        return labels.to(device)
 
     @staticmethod
     def _extract_assistant_spans(full_text: str) -> List[Tuple[int, int]]:
