@@ -1,0 +1,104 @@
+# GCP Training Configuration
+# Configuration for training with ui-verifiers running on GCP VMs
+
+training:
+  num_iterations: 1000
+  batch_size: 32
+  checkpoint_interval: 10
+  log_interval: 1
+  algorithm: rejection_sampling
+
+model:
+  name: "Qwen/Qwen2-VL-2B-Instruct"
+  torch_dtype: "float16"
+  device: "cuda"
+
+  use_lora: true
+  lora_config:
+    r: 16
+    lora_alpha: 32
+    target_modules: ["q_proj", "v_proj", "k_proj", "o_proj"]
+    lora_dropout: 0.05
+    bias: "none"
+
+  max_new_tokens: 128
+  temperature: 0.7
+  do_sample: true
+  freeze_vision_encoder: false
+  action_format: "json"
+
+actor:
+  num_actors: 8  # Number of parallel actors collecting data
+  max_steps_per_episode: 50
+  tasks_per_iteration: 128
+
+  # UI task configuration
+  session_type: "simple_data_entry"
+  task_prompt: "Complete the data entry form with information from the spreadsheet"
+  action_delay: 1.0
+  screenshot_size: [224, 224]
+
+environment:
+  # ui-verifiers API endpoints on GCP VMs
+  #
+  # Setup instructions:
+  # 1. Create GCP VMs with ui-verifiers installed
+  # 2. Ensure VMs are in same VPC network as trainer
+  # 3. Configure firewall rules to allow port 8000
+  # 4. Use internal DNS names or IP addresses
+  #
+  # Format options:
+  #   - Internal DNS: http://ui-verifier-vm-1:8000
+  #   - External IP: http://34.123.45.67:8000
+  #   - Internal IP: http://10.128.0.45:8000
+  #   - Full internal DNS: http://ui-vm-1.us-central1-a.c.my-project.internal:8000
+
+  ui_env_urls:
+    - "http://ui-verifier-vm-1:8000"
+    - "http://ui-verifier-vm-2:8000"
+    - "http://ui-verifier-vm-3:8000"
+    - "http://ui-verifier-vm-4:8000"
+    - "http://ui-verifier-vm-5:8000"
+    - "http://ui-verifier-vm-6:8000"
+    - "http://ui-verifier-vm-7:8000"
+    - "http://ui-verifier-vm-8:8000"
+
+  timeout: 30
+  max_retries: 3
+
+distributed:
+  use_distributed: false
+
+  # For future multi-VM training setup
+  num_trainer_vms: 1
+  num_env_vms: 8
+  gcp_project: "my-project-id"
+  gcp_zone: "us-central1-a"
+
+  # VM configuration
+  trainer_machine_type: "n1-standard-8"  # CPU: 8 vCPUs, 30 GB RAM
+  trainer_gpu: "nvidia-tesla-t4"  # GPU for training
+  env_machine_type: "n1-standard-4"  # CPU: 4 vCPUs, 15 GB RAM (for ui-verifiers)
+
+logging:
+  log_level: INFO
+  log_dir: experiments/gcp_training/logs
+  checkpoint_dir: experiments/gcp_training/checkpoints
+  trajectory_dir: experiments/gcp_training/trajectories
+
+# GCP-specific settings
+gcp:
+  # Service account for API access
+  service_account: "trainer-sa@my-project.iam.gserviceaccount.com"
+
+  # Network configuration
+  network: "default"
+  subnet: "default"
+
+  # Storage
+  use_gcs: false
+  gcs_bucket: "gs://my-training-bucket"
+
+  # Monitoring
+  use_cloud_logging: false
+  use_cloud_monitoring: false

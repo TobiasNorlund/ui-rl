@@ -1,0 +1,67 @@
+# Qwen2.5-VL-3B Training with LoRA (Recommended Configuration)
+#
+# This config demonstrates training Qwen2.5-VL-3B-Instruct with LoRA fine-tuning
+# using the recommended settings based on research.
+
+experiment_name: "qwen25_vl_lora_baseline"
+
+model:
+  name: "Qwen/Qwen2.5-VL-3B-Instruct"
+  device: "cuda"  # "cuda", "cpu", "mps"
+  torch_dtype: "bfloat16"  # "float16", "bfloat16", "float32"
+
+  # LoRA configuration (recommended settings)
+  use_lora: true
+  lora_target_option: "attention+mlp"  # Target both attention and MLP layers
+  lora_rank: 32  # Increased from 16 based on https://thinkingmachines.ai/blog/lora/
+  lora_alpha: 32
+  lora_dropout: 0.05
+  lora_bias: "none"
+  # lora_custom_modules: []  # Only used if lora_target_option="custom"
+
+  # Generation parameters
+  max_new_tokens: 128
+  temperature: 0.7
+  do_sample: true
+
+  # Training options
+  freeze_vision_encoder: false  # Set to true to only train language model
+
+trainer:
+  batch_size: 32  # Number of trajectories per training batch
+  learning_rate: null  # Auto-detect: 2e-4 for LoRA, 1e-5 for full fine-tuning
+  num_training_steps: 100
+  save_every: 10  # Save checkpoint every N steps
+  queue_timeout: 5.0  # Timeout when waiting for trajectories (seconds)
+
+  # Algorithm configuration
+  algorithm: "rejection_sampling"  # "rejection_sampling" or "ppo"
+  reward_threshold: 0.0  # Rejection sampling: only train on trajectories with reward > threshold
+
+actor:
+  max_steps_per_episode: 50
+  action_format: "json"  # "json", "text", "coordinates"
+  screenshot_size: [224, 224]  # Not currently used (VLM handles resizing)
+  task_prompt: "Complete the data entry task"
+  session_type: "simple_data_entry"
+  action_delay: 1.0  # Delay in seconds after each action
+  data_dir: null  # Optional: directory to save raw trajectories
+
+actor_pool:
+  target_concurrent_actors: 2  # Number of actors to run concurrently
+  max_concurrent_per_vm: 2  # Max concurrent sessions per VM (memory limit)
+  monitor_interval: 2.0  # Health check interval (seconds)
+
+environment:
+  # List of VM URLs (can specify multiple for load balancing)
+  vm_urls:
+    - "http://localhost:8000"  # Replace with your VM URL(s)
+  timeout: 30
+  max_retries: 3
+
+logging:
+  log_level: "INFO"  # "DEBUG", "INFO", "WARNING", "ERROR"
+  log_dir: "experiments/qwen25_vl_lora_baseline/logs"
+  checkpoint_dir: "experiments/qwen25_vl_lora_baseline/checkpoints"
+  trajectory_dir: null  # Optional: save trajectories to disk
+  verbose: false  # Set to true for DEBUG level logging
