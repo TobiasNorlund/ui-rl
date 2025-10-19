@@ -93,7 +93,12 @@ class VLMWrapper(nn.Module):
                 model_name,
                 trust_remote_code=True
             )
-
+            
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True
+            )
+        
         # Load model
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_name,
@@ -296,10 +301,27 @@ class VLMWrapper(nn.Module):
                     elif isinstance(processed_image, np.ndarray):
                         processed_image = Image.fromarray(processed_image.astype(np.uint8))
 
+                    conversation = [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image", "image": processed_image},
+                                {"type": "text", "text": prompt},
+                            ],
+                        }
+                    ]
+
+                    chat_prompt = self.processor.apply_chat_template(
+                        conversation,
+                        add_generation_prompt=True,
+                        tokenize=False
+                    )
+
                     inputs = self.processor(
-                        text=prompt,
+                        text=chat_prompt,
                         images=processed_image,
-                        return_tensors="pt"
+                        return_tensors="pt",
+                        padding=True
                     )
 
                     inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v
@@ -310,8 +332,8 @@ class VLMWrapper(nn.Module):
                         max_new_tokens=self.max_new_tokens,
                         temperature=self.temperature,
                         do_sample=self.do_sample,
-                        pad_token_id=self.processor.tokenizer.pad_token_id,
-                        eos_token_id=self.processor.tokenizer.eos_token_id
+                        pad_token_id=self.tokenizer.pad_token_id,
+                        eos_token_id=self.tokenizer.eos_token_id
                     )
 
                     generated_text = self.processor.batch_decode(

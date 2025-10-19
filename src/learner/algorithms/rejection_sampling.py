@@ -1,10 +1,9 @@
 """Rejection sampling algorithm implementation."""
 
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 import logging
 import torch
 import torch.nn as nn
-from torch.nn.utils.rnn import pad_sequence
 from .base import Algorithm
 from ...data_utils.trajectory import Trajectory
 
@@ -50,17 +49,12 @@ class RejectionSampling(Algorithm):
         """
         prompts = batch['prompts']
         generated_texts = batch['generated_texts']
+        images = batch['images']
 
-        # Build teacher-forcing sequences so inputs and labels share the same tokens
-        full_texts, prompt_prefixes = self._prepare_teacher_forcing_sequences(
-            prompts,
-            generated_texts
-        )
+        conversations = self._build_conversations(images, prompts, generated_texts)
+        full_texts = self._render_conversations(model, conversations)
+        labels = self._tokenize_conversations(model, conversations)
 
-        # Tokenize generated texts to create labels for supervised learning
-        labels = self._tokenize_texts(model, full_texts, prompt_prefixes)
-
-        # Run forward pass with labels (VLMWrapper will compute loss internally)
         model_outputs = model(
             images=batch['images'],  # List[PIL.Image]
             prompts=full_texts,  # Teacher-forcing text (prompt + generated text)
@@ -77,92 +71,81 @@ class RejectionSampling(Algorithm):
 
         return loss
 
-    def _prepare_teacher_forcing_sequences(
+    def _build_conversations(
         self,
+        images: List[Any],
         prompts: List[str],
         generated_texts: List[str]
-    ) -> Tuple[List[str], List[str]]:
+    ) -> List[List[Dict[str, Any]]]:
         """
-        Combine prompt and generated text for teacher forcing while keeping track
-        of the prompt portion for label masking.
+        Build chat-style conversations that pair each image with its prompt and generated text.
         """
-        full_texts = []
-        prompt_prefixes = []
+        conversations: List[List[Dict[str, Any]]] = []
 
-        for prompt, generated_text in zip(prompts, generated_texts):
-            # Ensure there is a separator between prompt and generated text
-            if prompt.endswith("\n"):
-                prompt_prefix = prompt
-            else:
-                prompt_prefix = f"{prompt}\n"
+        for image, prompt, generated_text in zip(images, prompts, generated_texts):
+            conversation = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": image},
+                        {"type": "text", "text": prompt},
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": generated_text},
+                    ],
+                },
+            ]
+            conversations.append(conversation)
 
-            full_texts.append(f"{prompt_prefix}{generated_text}")
-            prompt_prefixes.append(prompt_prefix)
+        return conversations
 
-        return full_texts, prompt_prefixes
-
-    def _tokenize_texts(
+    def _render_conversations(
         self,
         model: nn.Module,
-        full_texts: List[str],
-        prompt_prefixes: List[str]
-    ) -> torch.Tensor:
+        conversations: List[List[Dict[str, Any]]]
+    ) -> List[str]:
         """
-        Tokenize generated texts to create labels for language modeling.
-
-        Uses label masking to compute loss only on the generated_text tokens,
-        not on the prompt tokens. Prompt tokens are set to -100 (ignored by loss).
-
-        Args:
-            model: VLMWrapper model (has processor)
-            full_texts: List of combined prompt + generated text strings
-            prompt_prefixes: Prompt strings (with separator) for masking
-
-        Returns:
-            Token IDs tensor for labels [B*T, seq_len] with prompt tokens masked as -100
+        Render chat conversations into text prompts using the model's chat template.
         """
-        # Get processor from VLMWrapper
         processor = model.processor
-        tokenizer = processor.tokenizer
-
-        # We need to create labels where:
-        # - Prompt tokens are masked (-100, ignored in loss)
-        # - Generated text tokens are kept (used for loss computation)
-
-        batch_labels = []
-
-        for full_text, prompt_prefix in zip(full_texts, prompt_prefixes):
-            # Tokenize prompt separately (with separator) to know how many tokens to mask
-            prompt_tokens = tokenizer(
-                prompt_prefix,
-                return_tensors="pt",
-                add_special_tokens=True  # Include BOS token if needed
-            )['input_ids'][0]  # [prompt_len]
-
-            # Tokenize full sequence (prompt + generated_text)
-            full_tokens = tokenizer(
-                full_text,
-                return_tensors="pt",
-                add_special_tokens=True,
-                max_length=512,
-                truncation=True
-            )['input_ids'][0]  # [full_len]
-
-            # Create labels: mask prompt tokens with -100
-            labels = full_tokens.clone()
-            prompt_len = len(prompt_tokens)
-            labels[:prompt_len] = -100  # Mask prompt tokens (ignored in loss)
-
-            batch_labels.append(labels)
-
-        # Pad labels to same length
-        padded_labels = pad_sequence(
-            batch_labels,
-            batch_first=True,
-            padding_value=-100  # Padding is also ignored in loss
+        rendered = processor.apply_chat_template(
+            conversations,
+            add_generation_prompt=False,
+            tokenize=False,
         )
 
-        # Move to same device as model
-        padded_labels = padded_labels.to(next(model.parameters()).device)
+        if isinstance(rendered, str):
+            return [rendered]
+        return rendered
 
-        return padded_labels
+    def _tokenize_conversations(
+        self,
+        model: nn.Module,
+        conversations: List[List[Dict[str, Any]]]
+    ) -> torch.Tensor:
+        """
+        Tokenize chat conversations and build language-model labels that supervise
+        only the assistant portion of each message.
+        """
+        processor = model.processor
+        tokenized = processor.apply_chat_template(
+            conversations,
+            add_generation_prompt=False,
+            tokenize=True,
+            return_dict=True,
+            return_assistant_tokens_mask=True,
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+        )
+
+        input_ids = tokenized["input_ids"]
+        assistant_masks = tokenized["assistant_masks"]
+
+        labels = input_ids.clone()
+        labels[assistant_masks == 0] = -100
+
+        return labels.to(next(model.parameters()).device)

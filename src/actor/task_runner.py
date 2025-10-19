@@ -347,7 +347,7 @@ class TaskRunner:
         try:
             while not done and step < self.max_steps_per_episode:
                 # Get action from model (PIL Image input)
-                action, generated_text = (screenshot, self.task_prompt)
+                action, generated_text = self._get_action(screenshot, self.task_prompt)
                 # Execute action in environment
                 next_screenshot, reward, done, info = self._execute_action(action)
                 next_screenshot = self._preprocess_screenshot(next_screenshot)
