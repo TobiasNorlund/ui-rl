@@ -232,8 +232,8 @@ ui-rl/
 │       └── lora_ablation_mlp_only.yaml
 ├── scripts/
 │   ├── train_with_config.py       # Main training script
-│   ├── test_vm_connection.py      # Test VM connectivity
-│   └── test_actor_learner.py      # Integration test
+│   ├── test_vm_connection.py      # Test connection between TaskRunner and VM
+│   └── test_actor_learner.py      # Test that TaskRunner and Trainer works together with the VM
 └── docs/                           # Additional documentation
 ```
 
@@ -293,12 +293,15 @@ actor_pool.stop()
 ```python
 from src.actor.task_runner import TaskRunner
 from src.models.vlm_wrapper import VLMWrapper
+import queue
 
 vlm = VLMWrapper(model_name="Qwen/Qwen2.5-VL-3B-Instruct")
+trajectory_queue = queue.Queue()
 
 runner = TaskRunner(
     ui_env_url="http://your-vm:8000",
     model=vlm,
+    trajectory_queue=trajectory_queue,
     task_prompt="Complete the data entry form",
     session_type="simple_data_entry"
 )

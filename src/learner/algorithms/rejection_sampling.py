@@ -1,9 +1,10 @@
 """Rejection sampling algorithm implementation."""
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import logging
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pad_sequence
 from .base import Algorithm
 from ...data_utils.trajectory import Trajectory
 
@@ -41,24 +42,30 @@ class RejectionSampling(Algorithm):
         Supervised learning loss on successful trajectories using causal language modeling.
 
         For VLMs, we treat action prediction as a text generation task:
-        - Input: image + prompt ("What action should I take?")
-        - Target: action text (e.g., "left_click(100, 200)")
+        - Input: image + prompt + previous generated text (teacher forcing)
+        - Target: generated_text from trajectory (e.g., "click(100, 200)")
 
         The loss is computed using causal language modeling (next token prediction).
+        The model learns to reproduce the exact text it generated during successful episodes.
         """
-        # Convert actions to text labels for the model
-        action_texts = self._actions_to_text(batch['actions'])
+        prompts = batch['prompts']
+        generated_texts = batch['generated_texts']
 
-        # Tokenize action texts to get labels
-        # This uses the model's processor to convert text to token IDs
-        labels = self._tokenize_actions(model, action_texts, batch['prompts'])
+        # Build teacher-forcing sequences so inputs and labels share the same tokens
+        full_texts, prompt_prefixes = self._prepare_teacher_forcing_sequences(
+            prompts,
+            generated_texts
+        )
+
+        # Tokenize generated texts to create labels for supervised learning
+        labels = self._tokenize_texts(model, full_texts, prompt_prefixes)
 
         # Run forward pass with labels (VLMWrapper will compute loss internally)
         model_outputs = model(
             images=batch['images'],  # List[PIL.Image]
-            prompts=batch['prompts'],  # List[str]
+            prompts=full_texts,  # Teacher-forcing text (prompt + generated text)
             return_loss=True,
-            labels=labels  # Token IDs for ground truth actions
+            labels=labels  # Token IDs for ground truth generated texts
         )
 
         # HuggingFace models compute loss automatically when labels are provided
@@ -70,97 +77,92 @@ class RejectionSampling(Algorithm):
 
         return loss
 
-    def _actions_to_text(self, actions: List[Dict[str, Any]]) -> List[str]:
+    def _prepare_teacher_forcing_sequences(
+        self,
+        prompts: List[str],
+        generated_texts: List[str]
+    ) -> Tuple[List[str], List[str]]:
         """
-        Convert action dicts to text format for supervised learning.
-
-        Args:
-            actions: List of action dicts (e.g., {"action_type": "left_click", "x": 100, "y": 200})
-
-        Returns:
-            List of action text strings (e.g., "left_click(100, 200)")
+        Combine prompt and generated text for teacher forcing while keeping track
+        of the prompt portion for label masking.
         """
-        action_texts = []
+        full_texts = []
+        prompt_prefixes = []
 
-        for action in actions:
-            action_type = action.get('action_type', 'unknown')
-
-            # Format based on action type
-            if action_type == 'left_click':
-                x = action.get('x', 0)
-                y = action.get('y', 0)
-                text = f"left_click({x}, {y})"
-
-            elif action_type == 'right_click':
-                x = action.get('x', 0)
-                y = action.get('y', 0)
-                text = f"right_click({x}, {y})"
-
-            elif action_type == 'double_click':
-                x = action.get('x', 0)
-                y = action.get('y', 0)
-                text = f"double_click({x}, {y})"
-
-            elif action_type == 'type':
-                typed_text = action.get('text', '')
-                text = f"type(\"{typed_text}\")"
-
-            elif action_type == 'key':
-                key = action.get('key', '')
-                text = f"key({key})"
-
-            elif action_type == 'screenshot':
-                text = "screenshot()"
-
-            elif action_type == 'done':
-                text = "done()"
-
+        for prompt, generated_text in zip(prompts, generated_texts):
+            # Ensure there is a separator between prompt and generated text
+            if prompt.endswith("\n"):
+                prompt_prefix = prompt
             else:
-                # Generic format for unknown actions
-                text = f"{action_type}()"
-                logger.warning(f"Unknown action type: {action_type}")
+                prompt_prefix = f"{prompt}\n"
 
-            action_texts.append(text)
+            full_texts.append(f"{prompt_prefix}{generated_text}")
+            prompt_prefixes.append(prompt_prefix)
 
-        return action_texts
+        return full_texts, prompt_prefixes
 
-    def _tokenize_actions(
+    def _tokenize_texts(
         self,
         model: nn.Module,
-        action_texts: List[str],
-        prompts: List[str]
+        full_texts: List[str],
+        prompt_prefixes: List[str]
     ) -> torch.Tensor:
         """
-        Tokenize action texts to create labels for language modeling.
+        Tokenize generated texts to create labels for language modeling.
+
+        Uses label masking to compute loss only on the generated_text tokens,
+        not on the prompt tokens. Prompt tokens are set to -100 (ignored by loss).
 
         Args:
             model: VLMWrapper model (has processor)
-            action_texts: List of action text strings
-            prompts: List of prompts (for context)
+            full_texts: List of combined prompt + generated text strings
+            prompt_prefixes: Prompt strings (with separator) for masking
 
         Returns:
-            Token IDs tensor for labels [B*T, seq_len]
+            Token IDs tensor for labels [B*T, seq_len] with prompt tokens masked as -100
         """
         # Get processor from VLMWrapper
         processor = model.processor
+        tokenizer = processor.tokenizer
 
-        # Create full text sequences: prompt + action
-        # This matches how the model will be prompted during inference
-        full_texts = [f"{prompt}\n{action}" for prompt, action in zip(prompts, action_texts)]
+        # We need to create labels where:
+        # - Prompt tokens are masked (-100, ignored in loss)
+        # - Generated text tokens are kept (used for loss computation)
 
-        # Tokenize
-        tokenized = processor.tokenizer(
-            full_texts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=512
+        batch_labels = []
+
+        for full_text, prompt_prefix in zip(full_texts, prompt_prefixes):
+            # Tokenize prompt separately (with separator) to know how many tokens to mask
+            prompt_tokens = tokenizer(
+                prompt_prefix,
+                return_tensors="pt",
+                add_special_tokens=True  # Include BOS token if needed
+            )['input_ids'][0]  # [prompt_len]
+
+            # Tokenize full sequence (prompt + generated_text)
+            full_tokens = tokenizer(
+                full_text,
+                return_tensors="pt",
+                add_special_tokens=True,
+                max_length=512,
+                truncation=True
+            )['input_ids'][0]  # [full_len]
+
+            # Create labels: mask prompt tokens with -100
+            labels = full_tokens.clone()
+            prompt_len = len(prompt_tokens)
+            labels[:prompt_len] = -100  # Mask prompt tokens (ignored in loss)
+
+            batch_labels.append(labels)
+
+        # Pad labels to same length
+        padded_labels = pad_sequence(
+            batch_labels,
+            batch_first=True,
+            padding_value=-100  # Padding is also ignored in loss
         )
 
-        # Extract input_ids as labels
-        labels = tokenized['input_ids']
-
         # Move to same device as model
-        labels = labels.to(next(model.parameters()).device)
+        padded_labels = padded_labels.to(next(model.parameters()).device)
 
-        return labels
+        return padded_labels

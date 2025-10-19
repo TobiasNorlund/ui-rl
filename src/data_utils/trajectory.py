@@ -42,7 +42,7 @@ class Trajectory:
         observations_np = [np.array(img) for img in self.observations] if self.observations else []
         return {
             'observations': np.stack(observations_np) if observations_np else np.array([]),
-            'actions': self.actions,
+            'generated_texts': self.generated_texts,
             'rewards': np.array(self.rewards),
             'prompts': self.prompts,
             'metadata': self.metadata
@@ -60,7 +60,7 @@ class Trajectory:
 
         return cls(
             observations=observations_pil,
-            actions=data['actions'],
+            generated_texts=data['generated_texts'],
             rewards=list(data['rewards']),
             prompts=data['prompts'],
             metadata=data['metadata']
