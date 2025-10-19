@@ -22,7 +22,7 @@ def collate_trajectories(trajectories: List[Trajectory]) -> Dict[str, Any]:
     Returns:
         Dict containing batched data ready for model training:
         - images: List[PIL.Image] of all observations (kept as PIL for VLMWrapper)
-        - actions: [B*T] flattened actions
+        - generated_texts: [B*T] flattened generated_texts
         - rewards: [B*T] flattened rewards (numpy array)
         - prompts: [B*T] flattened prompts
         - trajectory_lengths: [B] length of each trajectory (for masking if needed)
@@ -32,7 +32,7 @@ def collate_trajectories(trajectories: List[Trajectory]) -> Dict[str, Any]:
         raise ValueError("Cannot collate empty list of trajectories")
 
     all_observations = []
-    all_actions = []
+    all_generated_texts = []
     all_rewards = []
     all_prompts = []
     trajectory_lengths = []
@@ -41,7 +41,7 @@ def collate_trajectories(trajectories: List[Trajectory]) -> Dict[str, Any]:
     for traj_idx, traj in enumerate(trajectories):
         # Extend with PIL Images directly (no conversion)
         all_observations.extend(traj.observations)
-        all_actions.extend(traj.actions)
+        all_generated_texts.extend(traj.generated_texts)
         all_rewards.extend(traj.rewards)
         all_prompts.extend(traj.prompts)
         trajectory_lengths.append(len(traj))
@@ -49,7 +49,7 @@ def collate_trajectories(trajectories: List[Trajectory]) -> Dict[str, Any]:
 
     return {
         'images': all_observations,  # List of PIL Images
-        'actions': all_actions,
+        'generated_texts': all_generated_texts,
         'rewards': np.array(all_rewards),
         'prompts': all_prompts,
         'trajectory_lengths': trajectory_lengths,

@@ -121,6 +121,7 @@ class TaskRunner:
 
         Returns:
             Action dict, e.g. {"action_type": "left_click", "x": 100, "y": 200}
+            Generated text, e.g. "left_click(100, 200)"
         """
         with torch.no_grad():  # No gradients during inference
             # VLMWrapper.predict_action accepts PIL Image directly
@@ -138,7 +139,7 @@ class TaskRunner:
                 # Fallback to screenshot action
                 action = {"action_type": "screenshot"}
 
-        return action
+        return action, generated_text
 
     def _execute_action(self, action: Dict[str, Any]) -> tuple:
         """
@@ -331,7 +332,7 @@ class TaskRunner:
 
         # Initialize trajectory
         observations = []
-        actions = []
+        generated_texts = []
         rewards = []
         prompts = []
 
@@ -346,14 +347,14 @@ class TaskRunner:
         try:
             while not done and step < self.max_steps_per_episode:
                 # Get action from model (PIL Image input)
-                action = self._get_action(screenshot, self.task_prompt)
+                action, generated_text = (screenshot, self.task_prompt)
                 # Execute action in environment
                 next_screenshot, reward, done, info = self._execute_action(action)
                 next_screenshot = self._preprocess_screenshot(next_screenshot)
 
                 # Store transition (PIL Images directly)
                 observations.append(screenshot)
-                actions.append(action)
+                generated_texts.append(generated_text)
                 rewards.append(reward)
                 prompts.append(self.task_prompt)
 
@@ -372,7 +373,7 @@ class TaskRunner:
         total_reward = sum(rewards)
         trajectory = Trajectory(
             observations=observations,
-            actions=actions,
+            generated_texts=generated_texts,
             rewards=rewards,
             prompts=prompts,
             metadata={

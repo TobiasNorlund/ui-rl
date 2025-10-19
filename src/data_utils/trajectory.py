@@ -19,7 +19,7 @@ class Trajectory:
     PIL (from VM) → PIL (stored) → PIL (batched) → PIL (to VLM)
     """
     observations: List[Image.Image]  # Screenshots as PIL Images [T]
-    actions: List[Dict[str, Any]]    # Action dicts [T], e.g. {"type": "click", "x": 100, "y": 200}
+    generated_texts: List[str]    # Generated texts, e.g. "click(x, y)"
     rewards: List[float]             # Rewards [T]
     prompts: List[str]               # Task prompts [T]
     metadata: Dict[str, Any] = field(default_factory=dict)  # task_id, success, timestamps, etc.
