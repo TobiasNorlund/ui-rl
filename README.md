@@ -144,6 +144,22 @@ pip install -e .
 
 ## Quick Start
 
+### How to run Kubernetes
+
+```bash
+# 1. Setup kubctl
+gcloud container clusters get-credentials simple-data-entry-cluster --region=europe-north2
+ 
+# 2. Make sure the ui-verifiers proxy server is deployed
+(cd /path/to/ui-verifiers/proxy; make deploy)
+
+# 3. Find out public/external IP of proxy server
+kubectl get services
+
+# 4. Run demo script
+uv run -m ui_rl.main <proxy ip>
+```
+
 ### 1. Configure Your Training
 
 Edit `config/qwen25_vl_lora.yaml` or create your own config:
