@@ -1,4 +1,3 @@
-import multiprocessing as mp
 import enum
 import requests
 import io
@@ -6,11 +5,13 @@ import uuid
 import logging
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
-from typing import List, Callable, Dict
-from collections import namedtuple
-from PIL import Image
+from typing import List, Dict, Callable
+from PIL import Image, ImageDraw
 from functools import partial
 from kubernetes import client, config
+from pathlib import Path
+from urllib.parse import quote
+from simple_data_entry import SimpleDataEntryTask
 
 
 # Load config and k10s client globally
@@ -48,22 +49,20 @@ class Action:
 
 @dataclass
 class Rollout:
+    task: str
     states: List[State] = field(default_factory=list)
     actions: List[Action] = field(default_factory=list)
+    response_messages: List[str] = field(default_factory=list)
     reward: float = 0.0
 
 
-# TODO: Perhaps better to feed KV cache + latest state?
-ActionPredictionInput = namedtuple("ActionPredictionInput", ["rollout", "result_queue"])
-
-
 def run_cua_session(
-    pod_manifest_fn: Callable,
-    cua_inference_queue: mp.Queue,
-    reward_fn: Callable,
+    task: SimpleDataEntryTask,
+    predict_next_action: Callable,
     cluster_host: str,
     max_steps: int = 10,
-    session_timeout: int = 60 * 5  # Timeout in seconds for session to come online
+    session_timeout: int = 60 * 5,  # Timeout in seconds for session to come online
+    log_dir: Path | None = None
 ) -> Rollout:
     """
     Launches a session pod, awaits it ready, and executes a Computer Use agent in it.
@@ -71,12 +70,12 @@ def run_cua_session(
     session_id = str(uuid.uuid4())[:8]
     log = partial(_log, session_id=session_id)
     pod_name = f"session-{session_id}"
-    rollout = Rollout()
+    rollout = Rollout(task=task.get_prompt())
 
     # Create pod
     core_v1.create_namespaced_pod(
         namespace="default",
-        body=pod_manifest_fn(pod_name, session_id)
+        body=task.get_pod_manifest(pod_name, session_id)
     )
 
     try:
@@ -84,40 +83,58 @@ def run_cua_session(
         _await_ready(cluster_host, session_id, session_timeout)
         log("Ready")
 
+        # Create log directory if specified
+        if log_dir is not None:
+            log_dir.mkdir(parents=True, exist_ok=True)
+
         # Start with screenshot
         action = Action(ActionType.Screenshot)
         state = _act(cluster_host, session_id, action)
         rollout.actions.append(action)
         rollout.states.append(state)
 
-        # Enter loop
-        prediction_result_queue = mp.Manager().Queue()
-        cua_inference_queue.put(
-            ActionPredictionInput(rollout, prediction_result_queue)
-        )
-        # TODO: Get updated KV cache?
-        while action := prediction_result_queue.get():
-            log(f"{action}")
-            state = _act(cluster_host, session_id, action)
-            rollout.actions.append(action)
-            rollout.states.append(state)
+        # Save initial screenshot
+        if log_dir is not None:
+            state.screenshot.save(log_dir / f"step_{len(rollout.states)-1:03d}.png")
 
-            # Queue next action prediction
-            if len(rollout.actions) < max_steps:
-                cua_inference_queue.put(
-                    ActionPredictionInput(rollout, prediction_result_queue)
-                )
-            else:
-                break
+        # Enter loop
+        step_num = len(rollout.states)
+        while action is not None and len(rollout.actions) < max_steps:
+            screenshot = rollout.states[-1].screenshot.copy()
+            action, message = predict_next_action(rollout)
+            if action is not None:
+                log(f"{action}")
+                draw = ImageDraw.Draw(screenshot)
+                draw.text((10, 10), str(action), fill="red")
+                if action.x is not None and action.y is not None:
+                    radius = 10
+                    draw.ellipse(
+                        [(action.x - radius, action.y - radius),
+                         (action.x + radius, action.y + radius)],
+                        outline="red",
+                        width=3
+                    )
+
+                state = _act(cluster_host, session_id, action)
+                rollout.actions.append(action)
+                rollout.states.append(state)
+                rollout.response_messages.append(message)
+
+            # Save screenshot
+            if log_dir is not None:
+                screenshot.save(log_dir / f"step_{step_num:03d}.png")
+
+            step_num += 1
 
         # Compute reward
         progress = _get_progress(cluster_host, session_id)
-        rollout.reward = reward_fn(progress)
+        rollout.reward = task.get_reward(progress)
 
         log("Finished successfully")
         return rollout
     except Exception as e:
-        log(f"Failed to delete pod {pod_name}: {e}", logging.ERROR)
+        import traceback
+        log(f"ERROR in {pod_name}: {traceback.format_exc()}", level=logging.ERROR)
     finally:
         # Delete the pod
         core_v1.delete_namespaced_pod(
@@ -129,7 +146,7 @@ def _await_ready(cluster_host: str, session_id: str, session_timeout: int):
     start_time = datetime.now()
     while (datetime.now() - start_time).seconds < session_timeout:
         try:
-            resp = requests.get(f"http://{cluster_host}:8000/proxy/{session_id}", timeout=5)
+            resp = requests.get(f"http://{cluster_host}/proxy/{session_id}", timeout=5)
             if resp.status_code == 200:
                 break
         except requests.exceptions.Timeout:
@@ -141,8 +158,8 @@ def _act(cluster_host: str, session_id: str, action: Action) -> State:
     Acts in the session via proxy server running on k10s cluster
     """
     log = partial(_log, session_id=session_id)
-    qs = "&".join(f"{k}={v}" for k, v in asdict(action).items() if v is not None)
-    url = f"http://{cluster_host}:8000/proxy/{session_id}/act?{qs}"
+    qs = "&".join(f"{k}={quote(str(v))}" for k, v in asdict(action).items() if v is not None)
+    url = f"http://{cluster_host}/proxy/{session_id}/act?{qs}"
     
     # Retry up to 3 times on 5xx errors
     for attempt in range(3):
@@ -165,7 +182,7 @@ def _act(cluster_host: str, session_id: str, action: Action) -> State:
                 image = Image.open(io.BytesIO(resp.content))
                 return State(image)
             except Exception as e:
-                log(f"Failed to parse response as image: {e}", logging.ERROR)
+                log(f"Failed to parse response as image: {e}", level=logging.ERROR)
                 raise ValueError(f"Invalid image response: {e}")
                 
         except requests.exceptions.RequestException as e:
@@ -173,7 +190,7 @@ def _act(cluster_host: str, session_id: str, action: Action) -> State:
                 log(f"Request failed, retrying... (attempt {attempt + 1}/3): {e}")
                 continue
             else:
-                log(f"Request failed after 3 attempts: {e}", logging.ERROR)
+                log(f"Request failed after 3 attempts: {e}", level=logging.ERROR)
                 raise
 
 
@@ -182,7 +199,7 @@ def _get_progress(cluster_host, session_id) -> Dict:
     Get progress information from the session pod via proxy server
     """
     log = partial(_log, session_id=session_id)
-    url = f"http://{cluster_host}:8000/proxy/{session_id}/progress"
+    url = f"http://{cluster_host}/proxy/{session_id}/progress"
     
     # Retry up to 3 times on 5xx errors
     for attempt in range(3):
