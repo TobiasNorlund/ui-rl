@@ -348,6 +348,9 @@ Current structure follows "flat is better than nested":
 ### Running Tests
 
 ```bash
+# Test single episode with VLM inference (saves trajectories for analysis)
+python scripts/test_single_episode.py --cluster-host your-proxy-ip
+
 # Test pod connection
 python scripts/test_vm_connection.py --cluster-host your-proxy-ip
 
@@ -357,6 +360,8 @@ python scripts/test_actor_learner.py \
     --num-trajectories 5 \
     --num-actors 2
 ```
+
+See [scripts/TEST_SINGLE_EPISODE.md](scripts/TEST_SINGLE_EPISODE.md) for detailed usage of the single episode test.
 
 ## Contributing
 
