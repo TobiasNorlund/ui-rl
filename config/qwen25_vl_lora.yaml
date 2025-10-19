@@ -44,20 +44,19 @@ actor:
   screenshot_size: [224, 224]  # Not currently used (VLM handles resizing)
   task_prompt: "Complete the data entry task"
   session_type: "simple_data_entry"
-  action_delay: 1.0  # Delay in seconds after each action
   data_dir: null  # Optional: directory to save raw trajectories
 
 actor_pool:
   target_concurrent_actors: 2  # Number of actors to run concurrently
-  max_concurrent_per_vm: 2  # Max concurrent sessions per VM (memory limit)
   monitor_interval: 2.0  # Health check interval (seconds)
 
 environment:
-  # List of VM URLs (can specify multiple for load balancing)
-  vm_urls:
-    - "http://localhost:8000"  # Replace with your VM URL(s)
+  # Kubernetes cluster configuration
+  cluster_host: "localhost"  # Replace with your proxy server IP
+  namespace: "default"
   timeout: 30
   max_retries: 3
+  session_timeout: 300  # Pod startup timeout in seconds
 
 logging:
   log_level: "INFO"  # "DEBUG", "INFO", "WARNING", "ERROR"

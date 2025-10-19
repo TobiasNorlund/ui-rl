@@ -58,23 +58,23 @@ class ActorConfig:
     task_prompt: str = "Complete the data entry task"
     session_type: str = "simple_data_entry"
     data_dir: Optional[str] = None  # Optional directory to save raw trajectories
-    action_delay: float = 1.0  # Delay in seconds after each action
 
 
 @dataclass
 class ActorPoolConfig:
     """ActorPoolManager configuration."""
     target_concurrent_actors: int = 2
-    max_concurrent_per_vm: int = 2  # Memory limit per VM
     monitor_interval: float = 2.0
 
 
 @dataclass
 class EnvironmentConfig:
-    """Environment (VM) configuration."""
-    vm_urls: List[str] = field(default_factory=lambda: ["http://localhost:8000"])
+    """Environment (Kubernetes cluster) configuration."""
+    cluster_host: str = "localhost"  # Proxy server host/IP
+    namespace: str = "default"  # Kubernetes namespace for pods
     timeout: int = 30
     max_retries: int = 3
+    session_timeout: int = 300  # Timeout in seconds for pod to come online
 
 
 @dataclass
@@ -208,12 +208,9 @@ class Config:
         if self.actor_pool.target_concurrent_actors <= 0:
             raise ValueError("target_concurrent_actors must be positive")
 
-        if self.actor_pool.max_concurrent_per_vm <= 0:
-            raise ValueError("max_concurrent_per_vm must be positive")
-
         # Validate environment config
-        if not self.environment.vm_urls:
-            raise ValueError("At least one VM URL required")
+        if not self.environment.cluster_host:
+            raise ValueError("cluster_host is required")
 
         logger.info("Configuration validated successfully")
 
@@ -247,8 +244,8 @@ class Config:
             "",
             "Actor Pool Configuration:",
             f"  Target Concurrent Actors: {self.actor_pool.target_concurrent_actors}",
-            f"  Max Concurrent per VM: {self.actor_pool.max_concurrent_per_vm}",
-            f"  VMs: {len(self.environment.vm_urls)}",
+            f"  Cluster Host: {self.environment.cluster_host}",
+            f"  Namespace: {self.environment.namespace}",
             "",
             "Actor Configuration:",
             f"  Max Steps per Episode: {self.actor.max_steps_per_episode}",

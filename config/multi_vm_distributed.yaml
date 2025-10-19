@@ -1,9 +1,9 @@
-# Multi-VM Distributed Training Configuration
+# Kubernetes Distributed Training Configuration
 #
-# This config demonstrates training across multiple VMs with load balancing.
+# This config demonstrates training with Kubernetes pods.
 # Useful for scaling up data collection with ActorPoolManager.
 
-experiment_name: "qwen25_vl_multi_vm"
+experiment_name: "qwen25_vl_kubernetes"
 
 model:
   name: "Qwen/Qwen2.5-VL-3B-Instruct"
@@ -37,28 +37,24 @@ actor:
   screenshot_size: [224, 224]
   task_prompt: "Complete the data entry task"
   session_type: "simple_data_entry"
-  action_delay: 1.0
-  data_dir: "experiments/qwen25_vl_multi_vm/trajectories"  # Save trajectories for analysis
+  data_dir: "experiments/qwen25_vl_kubernetes/trajectories"  # Save trajectories for analysis
 
 actor_pool:
-  target_concurrent_actors: 8  # 2 actors per VM * 4 VMs
-  max_concurrent_per_vm: 2  # Memory limit per VM
+  target_concurrent_actors: 8  # Number of parallel actors
   monitor_interval: 2.0
 
 environment:
-  # Multiple VMs for distributed data collection
-  # ActorPoolManager will load balance across these VMs
-  vm_urls:
-    - "http://vm-1.example.com:8000"
-    - "http://vm-2.example.com:8000"
-    - "http://vm-3.example.com:8000"
-    - "http://vm-4.example.com:8000"
+  # Kubernetes cluster configuration
+  # Proxy server handles routing to individual pods by session_id
+  cluster_host: "34.123.45.67"  # Replace with your proxy server IP
+  namespace: "default"
   timeout: 30
   max_retries: 3
+  session_timeout: 300  # Pod startup timeout in seconds
 
 logging:
   log_level: "INFO"
-  log_dir: "experiments/qwen25_vl_multi_vm/logs"
-  checkpoint_dir: "experiments/qwen25_vl_multi_vm/checkpoints"
-  trajectory_dir: "experiments/qwen25_vl_multi_vm/trajectories"  # Save trajectories
+  log_dir: "experiments/qwen25_vl_kubernetes/logs"
+  checkpoint_dir: "experiments/qwen25_vl_kubernetes/checkpoints"
+  trajectory_dir: "experiments/qwen25_vl_kubernetes/trajectories"  # Save trajectories
   verbose: false

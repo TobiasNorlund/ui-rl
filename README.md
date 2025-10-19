@@ -15,7 +15,8 @@ This project implements an **Actor-Learner** RL training system for teaching VLM
 
 ## TODO
 ### High Priority
-- [ ] Implement `/progress` endpoint protocol to get reward and done signals from UI-verifiers (Currently using dummy values (`reward=1.0`, `done=True`) in TaskRunner
+- [x] Migrate from VM sessions to Kubernetes pod-based sessions
+- [x] Implement `/progress` endpoint for reward and done signals
 - [ ] Current ActionsDecoder is generic and needs updating to match Qwen2.5-VL output format
 - [ ] W&B integration for metrics
 - [ ] Implement evaluation script and metrics
@@ -37,49 +38,53 @@ This project implements an **Actor-Learner** RL training system for teaching VLM
 └──────────────────────────────────────────────────────────────┘
                               │
                               ▼
-┌─────────────────┐     ┌──────────────────┐
-│  UI Env (VM)    │     │ ActorPoolManager │
-│  ┌───────────┐  │     │                  │
-│  │  Browser  │  │     │  Manages pool    │
-│  └─────┬─────┘  │     │  of actors with  │
-│        │        │     │  VM limits       │
-│  ┌─────▼─────┐  │     └────────┬─────────┘
-│  │  FastAPI  │  │              │
-│  │ (ui-verif)│  │              │ spawns/monitors
-│  └─────┬─────┘  │              │
-└────────┼────────┘              │
-         │                       │
-         │ screenshots/actions   ▼
-         │              ┌─────────────┐
-         └──────────────┤ TaskRunner  │──┐
-                        │  (Actor)    │  │
-                        └─────────────┘  │
-                                         │
-         ┌──────────────┬ TaskRunner  │──┤ Trajectories
-         │              │  (Actor)    │  │ via Queue
-         │              └─────────────┘  │
-         │                               │
-         │                               ▼
-         │                    ┌──────────────────┐
-         │                    │     Trainer      │
-         │                    │    (Learner)     │
-         │                    │                  │
-         │                    │  ┌────────────┐  │
-         └────────────────────┼──│ VLMWrapper │  │
-           model updates      │  │ (w/ LoRA)  │  │
-                              │  └────────────┘  │
-                              └──────────────────┘
+┌───────────────────────┐     ┌──────────────────┐
+│  Kubernetes Cluster   │     │ ActorPoolManager │
+│  ┌─────────────────┐  │     │                  │
+│  │  Proxy Server   │  │     │  Manages pool    │
+│  │  (Routes by     │  │     │  of actors       │
+│  │   session_id)   │  │     │                  │
+│  └────────┬────────┘  │     └────────┬─────────┘
+│           │           │              │
+│  ┌────────┴────────┐  │              │ spawns/monitors
+│  │ Session Pods    │  │              │
+│  │ ┌─────┐ ┌─────┐ │  │              │
+│  │ │Pod 1│ │Pod 2│ │  │              ▼
+│  │ └─────┘ └─────┘ │  │     ┌─────────────┐
+│  └─────────────────┘  │     │ TaskRunner  │──┐
+└───────────┬───────────┘     │  (Actor)    │  │
+            │                 └─────────────┘  │
+            │                                  │
+            │ screenshots/actions              │
+            │ via /proxy/{session_id}/*        │ Trajectories
+            │                                  │ via Queue
+            │                 ┌─────────────┐  │
+            └─────────────────┤ TaskRunner  │──┤
+                              │  (Actor)    │  │
+                              └─────────────┘  │
+                                               │
+                                               ▼
+                                    ┌──────────────────┐
+                                    │     Trainer      │
+                                    │    (Learner)     │
+                                    │                  │
+                                    │  ┌────────────┐  │
+                                    │  │ VLMWrapper │  │
+           model updates ←──────────┼──│ (w/ LoRA)  │  │
+                                    │  └────────────┘  │
+                                    └──────────────────┘
 ```
 
 ### Component Responsibilities
 
 #### **TaskRunner** (src/actor/task_runner.py)
-- Creates UI sessions via ui-verifiers API
+- Creates Kubernetes pods for each episode
 - Runs VLM inference to get actions from screenshots
-- Executes actions in the environment
+- Executes actions via proxy server routing
 - Collects complete trajectories (observations, actions, rewards)
+- Deletes pods when episode completes
 - Puts finished trajectories in queue for training
-- **Lifecycle**: Runs ONE episode, then exits (clean session management)
+- **Lifecycle**: Runs ONE episode (create pod → run → delete pod), then exits
 
 #### **Learner: Trainer** (src/learner/trainer.py)
 - Owns the trajectory queue
@@ -102,11 +107,10 @@ This project implements an **Actor-Learner** RL training system for teaching VLM
 
 #### **ActorPoolManager** (src/orchestration/actor_pool_manager.py)
 - Maintains pool of concurrent actors (TaskRunners)
-- Enforces VM resource limits (`max_concurrent_per_vm`)
 - Automatically spawns replacement actors when episodes finish
-- Round-robin load balancing across multiple VMs
 - Monitor thread for health checks and crash recovery
-- One actor = one episode = one VM session
+- Kubernetes handles pod scheduling and resource management
+- One actor = one episode = one Kubernetes pod
 
 #### **Config System** (src/config/)
 - YAML-based configuration for all components
@@ -181,15 +185,15 @@ trainer:
 actor:
   max_steps_per_episode: 50
   task_prompt: "Complete the data entry task"
-  session_type: "simple_data_entry"
+  session_type: "simple_data_entry"  # Maps to pod manifest function
 
 actor_pool:
   target_concurrent_actors: 2
-  max_concurrent_per_vm: 2
 
 environment:
-  vm_urls:
-    - "http://your-vm-ip:8000"
+  cluster_host: "your-proxy-server-ip"  # Kubernetes proxy server
+  namespace: "default"
+  session_timeout: 300
 ```
 
 ### 2. Run Training
@@ -198,10 +202,10 @@ environment:
 # Train with config file
 python scripts/train_with_config.py --config config/qwen25_vl_lora.yaml
 
-# Override VM URL
+# Override cluster host
 python scripts/train_with_config.py \
     --config config/qwen25_vl_lora.yaml \
-    --vm-url http://34.123.45.67:8000
+    --cluster-host 34.123.45.67
 
 # Override training steps
 python scripts/train_with_config.py \
@@ -263,6 +267,7 @@ from src.models.vlm_wrapper import VLMWrapper
 from src.learner.trainer import Trainer
 from src.learner.algorithms.rejection_sampling import RejectionSampling
 from src.orchestration import ActorPoolManager
+from ui_rl.simple_data_entry import simple_data_entry_pod_manifest
 import queue
 
 # Load config
@@ -289,12 +294,12 @@ trainer = Trainer(
 # Create actor pool
 actor_pool = ActorPoolManager(
     target_concurrent_actors=config.actor_pool.target_concurrent_actors,
-    vm_urls=config.environment.vm_urls,
-    max_concurrent_per_vm=config.actor_pool.max_concurrent_per_vm,
+    cluster_host=config.environment.cluster_host,
+    pod_manifest_fn=simple_data_entry_pod_manifest,
     model=model,
     trajectory_queue=trajectory_queue,
     task_prompt=config.actor.task_prompt,
-    session_type=config.actor.session_type,
+    namespace=config.environment.namespace,
     max_steps_per_episode=config.actor.max_steps_per_episode
 )
 
@@ -309,17 +314,16 @@ actor_pool.stop()
 ```python
 from src.actor.task_runner import TaskRunner
 from src.models.vlm_wrapper import VLMWrapper
-import queue
+from ui_rl.simple_data_entry import simple_data_entry_pod_manifest
 
 vlm = VLMWrapper(model_name="Qwen/Qwen2.5-VL-3B-Instruct")
-trajectory_queue = queue.Queue()
 
 runner = TaskRunner(
-    ui_env_url="http://your-vm:8000",
+    cluster_host="your-proxy-ip",
+    pod_manifest_fn=simple_data_entry_pod_manifest,
     model=vlm,
-    trajectory_queue=trajectory_queue,
     task_prompt="Complete the data entry form",
-    session_type="simple_data_entry"
+    namespace="default"
 )
 
 trajectory = runner.run_episode()
@@ -344,12 +348,12 @@ Current structure follows "flat is better than nested":
 ### Running Tests
 
 ```bash
-# Test VM connection
-python scripts/test_vm_connection.py --vm-url http://your-vm:8000
+# Test pod connection
+python scripts/test_vm_connection.py --cluster-host your-proxy-ip
 
 # Test full actor-learner loop
 python scripts/test_actor_learner.py \
-    --vm-url http://your-vm:8000 \
+    --cluster-host your-proxy-ip \
     --num-trajectories 5 \
     --num-actors 2
 ```

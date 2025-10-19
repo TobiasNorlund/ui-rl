@@ -1,10 +1,10 @@
-"""Actor Pool Manager for continuous trajectory collection with VM resource limits."""
+"""Actor Pool Manager for continuous trajectory collection with Kubernetes pods."""
 
 import threading
 import queue
 import time
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
 from pathlib import Path
 import torch.nn as nn
@@ -16,20 +16,19 @@ logger = logging.getLogger(__name__)
 
 class ActorPoolManager:
     """
-    Manages a pool of TaskRunner actors with VM resource constraints.
+    Manages a pool of TaskRunner actors that create Kubernetes pods.
 
     Key features:
     - One actor runs one episode then exits (clean session lifecycle)
     - Maintains target number of concurrent actors
-    - Respects max concurrent sessions per VM (memory constraint)
     - Automatically spawns replacement actors when episodes finish
-    - Round-robin VM assignment for load balancing
     - Monitor thread for health checks and crash recovery
+    - Kubernetes handles pod scheduling and resource management
 
     Design:
     Each actor thread:
       1. Creates TaskRunner
-      2. Runs exactly ONE episode (creates/closes VM session)
+      2. Runs exactly ONE episode (TaskRunner creates/deletes Kubernetes pod)
       3. Puts trajectory in queue
       4. Exits (thread terminates)
       5. Pool spawns replacement actor
@@ -38,58 +37,54 @@ class ActorPoolManager:
     def __init__(
         self,
         target_concurrent_actors: int,
-        vm_urls: List[str],
-        max_concurrent_per_vm: int,
+        cluster_host: str,
+        pod_manifest_fn: Callable[[str, str], Dict],
         model: nn.Module,
         trajectory_queue: queue.Queue,
         task_prompt: str,
-        session_type: str = "simple_data_entry",
+        namespace: str = "default",
         max_steps_per_episode: int = 20,
         action_format: str = "json",
-        action_delay: float = 1.0,
         data_dir: Optional[Path] = None,
-        monitor_interval: float = 2.0
+        monitor_interval: float = 2.0,
+        session_timeout: int = 300,
     ):
         """
         Initialize Actor Pool Manager.
 
         Args:
             target_concurrent_actors: Target number of actors running concurrently
-            vm_urls: List of VM URLs to distribute actors across
-            max_concurrent_per_vm: Max concurrent sessions per VM (memory limit)
+            cluster_host: Kubernetes cluster proxy server host/IP
+            pod_manifest_fn: Function that generates pod manifest given (pod_name, session_id)
             model: VLM model for actors to use
             trajectory_queue: Queue to put collected trajectories
             task_prompt: Task prompt for actors
-            session_type: Type of VM session to create
+            namespace: Kubernetes namespace for pods
             max_steps_per_episode: Max steps per episode
             action_format: Action format for action decoder
-            action_delay: Delay in seconds after each action
             data_dir: Optional directory to save raw trajectories
             monitor_interval: How often to check actor health (seconds)
+            session_timeout: Timeout in seconds for pod to come online
         """
         self.target_concurrent_actors = target_concurrent_actors
-        self.vm_urls = vm_urls
-        self.max_concurrent_per_vm = max_concurrent_per_vm
+        self.cluster_host = cluster_host
+        self.pod_manifest_fn = pod_manifest_fn
+        self.namespace = namespace
+        self.session_timeout = session_timeout
         self.model = model
         self.trajectory_queue = trajectory_queue
         self.task_prompt = task_prompt
-        self.session_type = session_type
         self.max_steps_per_episode = max_steps_per_episode
         self.action_format = action_format
-        self.action_delay = action_delay
         self.data_dir = Path(data_dir) if data_dir else None
         self.monitor_interval = monitor_interval
 
         # State tracking (protected by lock)
         self.lock = threading.Lock()
         self.active_actors: Dict[int, Dict[str, Any]] = {}
-        self.active_count_per_vm: Dict[str, int] = {url: 0 for url in vm_urls}
 
         # Actor ID counter
         self.next_actor_id = 1
-
-        # Round-robin state for load balancing
-        self.next_vm_index = 0
 
         # Control
         self.stop_event = threading.Event()
@@ -106,9 +101,8 @@ class ActorPoolManager:
         logger.info("=" * 60)
         logger.info("ActorPoolManager initialized")
         logger.info(f"Target concurrent actors: {target_concurrent_actors}")
-        logger.info(f"VMs: {len(vm_urls)}")
-        logger.info(f"Max concurrent per VM: {max_concurrent_per_vm}")
-        logger.info(f"Total capacity: {len(vm_urls) * max_concurrent_per_vm} concurrent sessions")
+        logger.info(f"Cluster host: {cluster_host}")
+        logger.info(f"Namespace: {namespace}")
         logger.info("=" * 60)
 
     def start(self):
@@ -127,18 +121,11 @@ class ActorPoolManager:
         self.monitor_thread.start()
         logger.info("Monitor thread started")
 
-        # Spawn initial actors up to target (respecting VM limits)
-        initial_spawned = 0
+        # Spawn initial actors up to target
         for _ in range(self.target_concurrent_actors):
-            vm_url = self._get_next_available_vm()
-            if vm_url:
-                self._spawn_actor(vm_url)
-                initial_spawned += 1
-            else:
-                logger.warning(f"Could not spawn actor: all VMs at capacity")
-                break
+            self._spawn_actor()
 
-        logger.info(f"Spawned {initial_spawned} initial actors")
+        logger.info(f"Spawned {self.target_concurrent_actors} initial actors")
 
     def stop(self, timeout: float = 30.0):
         """
@@ -176,35 +163,9 @@ class ActorPoolManager:
 
         logger.info("ActorPoolManager stopped")
 
-    def _get_next_available_vm(self) -> Optional[str]:
+    def _spawn_actor(self) -> int:
         """
-        Get next VM that has capacity for another actor.
-        Uses round-robin for load balancing to distribute load evenly.
-
-        Returns:
-            VM URL or None if all VMs are at capacity
-        """
-        with self.lock:
-            # Try each VM starting from next_vm_index (round-robin)
-            for i in range(len(self.vm_urls)):
-                # Calculate actual index with wrap-around
-                vm_index = (self.next_vm_index + i) % len(self.vm_urls)
-                vm_url = self.vm_urls[vm_index]
-
-                if self.active_count_per_vm[vm_url] < self.max_concurrent_per_vm:
-                    # Found available VM, update index for next time
-                    self.next_vm_index = (vm_index + 1) % len(self.vm_urls)
-                    return vm_url
-
-            # All VMs at capacity
-            return None
-
-    def _spawn_actor(self, vm_url: str) -> int:
-        """
-        Spawn a new actor thread on the specified VM.
-
-        Args:
-            vm_url: VM URL to spawn actor on
+        Spawn a new actor thread.
 
         Returns:
             Actor ID
@@ -216,7 +177,7 @@ class ActorPoolManager:
         # Create thread that runs ONE episode
         thread = threading.Thread(
             target=self._run_single_episode,
-            args=(actor_id, vm_url),
+            args=(actor_id,),
             name=f"Actor-{actor_id}",
             daemon=False  # We want to wait for these to finish
         )
@@ -225,20 +186,17 @@ class ActorPoolManager:
         with self.lock:
             self.active_actors[actor_id] = {
                 'thread': thread,
-                'vm_url': vm_url,
                 'start_time': datetime.now(),
                 'status': 'running'
             }
-            self.active_count_per_vm[vm_url] += 1
             self.stats['total_actors_spawned'] += 1
 
         thread.start()
-        logger.debug(f"Spawned Actor-{actor_id} on {vm_url} "
-                    f"({self.active_count_per_vm[vm_url]}/{self.max_concurrent_per_vm})")
+        logger.debug(f"Spawned Actor-{actor_id}")
 
         return actor_id
 
-    def _run_single_episode(self, actor_id: int, vm_url: str):
+    def _run_single_episode(self, actor_id: int):
         """
         Run exactly ONE episode then exit.
 
@@ -246,26 +204,26 @@ class ActorPoolManager:
 
         Args:
             actor_id: Unique actor ID
-            vm_url: VM URL to connect to
         """
         actor_logger = logging.getLogger(f"Actor-{actor_id}")
-        actor_logger.info(f"Starting episode on {vm_url}")
+        actor_logger.info(f"Starting episode")
 
         try:
             # Create TaskRunner for single episode
             runner = TaskRunner(
-                ui_env_url=vm_url,
+                cluster_host=self.cluster_host,
+                pod_manifest_fn=self.pod_manifest_fn,
                 model=self.model,
                 task_prompt=self.task_prompt,
-                session_type=self.session_type,
+                namespace=self.namespace,
                 max_steps_per_episode=self.max_steps_per_episode,
-                action_delay=self.action_delay,
                 action_format=self.action_format,
-                data_dir=self.data_dir
+                data_dir=self.data_dir,
+                session_timeout=self.session_timeout
             )
 
             # Run EXACTLY ONE episode
-            # This creates session, runs episode, closes session
+            # This creates pod, runs episode, deletes pod
             trajectory = runner.run_episode()
             self.trajectory_queue.put(trajectory)
 
@@ -310,10 +268,6 @@ class ActorPoolManager:
                 # Clean up finished actors
                 for actor_id in finished_actors:
                     info = self.active_actors.pop(actor_id)
-                    vm_url = info['vm_url']
-
-                    # Free up VM slot
-                    self.active_count_per_vm[vm_url] -= 1
 
                     # Update stats
                     if info['status'] == 'finished':
@@ -328,12 +282,7 @@ class ActorPoolManager:
                     needed = self.target_concurrent_actors - current_active
 
                     for _ in range(needed):
-                        vm_url = self._get_next_available_vm()
-                        if vm_url:
-                            self._spawn_actor(vm_url)
-                        else:
-                            # All VMs at capacity, wait for next cycle
-                            break
+                        self._spawn_actor()
 
         logger.info("Monitor loop stopped")
 
@@ -347,7 +296,6 @@ class ActorPoolManager:
         with self.lock:
             stats = dict(self.stats)
             stats['active_actors'] = len(self.active_actors)
-            stats['active_per_vm'] = dict(self.active_count_per_vm)
 
             if stats['start_time']:
                 elapsed = (datetime.now() - stats['start_time']).total_seconds()

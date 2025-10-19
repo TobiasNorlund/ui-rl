@@ -12,14 +12,14 @@ Usage:
     # Use default config
     python scripts/train_with_config.py --config config/qwen25_vl_lora.yaml
 
-    # Use custom VM URL (override config)
-    python scripts/train_with_config.py --config config/qwen25_vl_lora.yaml --vm-url http://34.123.45.67:8000
+    # Use custom cluster host (override config)
+    python scripts/train_with_config.py --config config/qwen25_vl_lora.yaml --cluster-host 34.123.45.67
 
     # Run LoRA ablation experiments
     python scripts/train_with_config.py --config config/experiments/lora_ablation_attention_only.yaml
     python scripts/train_with_config.py --config config/experiments/lora_ablation_mlp_only.yaml
 
-    # Multi-VM distributed training
+    # Kubernetes distributed training
     python scripts/train_with_config.py --config config/multi_vm_distributed.yaml
 """
 
@@ -39,6 +39,19 @@ from src.models.vlm_wrapper import VLMWrapper
 from src.learner.trainer import Trainer
 from src.learner.algorithms.rejection_sampling import RejectionSampling
 from src.orchestration import ActorPoolManager
+
+# Import pod manifest functions
+# Note: User should create their own pod manifest functions for their tasks
+# This is just importing the example from ui_rl for simple_data_entry
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent / "ui_rl"))
+    from simple_data_entry import simple_data_entry_pod_manifest
+    POD_MANIFEST_REGISTRY = {
+        "simple_data_entry": simple_data_entry_pod_manifest
+    }
+except ImportError:
+    # If ui_rl module not available, user must provide their own manifests
+    POD_MANIFEST_REGISTRY = {}
 
 
 def setup_logging(config: Config):
@@ -156,19 +169,29 @@ def create_actor_pool_from_config(
     logger = logging.getLogger(__name__)
     logger.info("Creating ActorPoolManager from config...")
 
+    # Get pod manifest function from registry
+    session_type = config.actor.session_type
+    if session_type not in POD_MANIFEST_REGISTRY:
+        raise ValueError(
+            f"No pod manifest function found for session_type '{session_type}'. "
+            f"Available types: {list(POD_MANIFEST_REGISTRY.keys())}. "
+            f"Please add your pod manifest function to POD_MANIFEST_REGISTRY."
+        )
+    pod_manifest_fn = POD_MANIFEST_REGISTRY[session_type]
+
     actor_pool = ActorPoolManager(
         target_concurrent_actors=config.actor_pool.target_concurrent_actors,
-        vm_urls=config.environment.vm_urls,
-        max_concurrent_per_vm=config.actor_pool.max_concurrent_per_vm,
+        cluster_host=config.environment.cluster_host,
+        pod_manifest_fn=pod_manifest_fn,
         model=model,
         trajectory_queue=trajectory_queue,
         task_prompt=config.actor.task_prompt,
-        session_type=config.actor.session_type,
+        namespace=config.environment.namespace,
         max_steps_per_episode=config.actor.max_steps_per_episode,
         action_format=config.actor.action_format,
-        action_delay=config.actor.action_delay,
         data_dir=config.actor.data_dir,
-        monitor_interval=config.actor_pool.monitor_interval
+        monitor_interval=config.actor_pool.monitor_interval,
+        session_timeout=config.environment.session_timeout
     )
 
     return actor_pool
@@ -190,9 +213,9 @@ def main():
 
     # Optional overrides
     parser.add_argument(
-        "--vm-url",
+        "--cluster-host",
         type=str,
-        help="Override VM URL(s) from config (comma-separated for multiple)"
+        help="Override cluster host from config"
     )
     parser.add_argument(
         "--num-steps",
@@ -226,9 +249,8 @@ def main():
         return 1
 
     # Apply command-line overrides
-    if args.vm_url:
-        vm_urls = [url.strip() for url in args.vm_url.split(',')]
-        config.environment.vm_urls = vm_urls
+    if args.cluster_host:
+        config.environment.cluster_host = args.cluster_host
 
     if args.num_steps:
         config.trainer.num_training_steps = args.num_steps

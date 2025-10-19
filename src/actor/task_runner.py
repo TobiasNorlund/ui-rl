@@ -1,96 +1,114 @@
-"""TaskRunner for executing UI tasks and collecting trajectories using ui-verifiers API."""
+"""TaskRunner for executing UI tasks and collecting trajectories using Kubernetes pods."""
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 from pathlib import Path
 import logging
 from datetime import datetime
+import time
+import uuid
 import numpy as np
 import torch
 import torch.nn as nn
 import requests
 from PIL import Image
 from io import BytesIO
+from kubernetes import client, config as k8s_config
 
 from ..data_utils.trajectory import Trajectory
 from ..data_utils.actions_decoder import ActionsDecoder
 
 logger = logging.getLogger(__name__)
 
+# Load Kubernetes config globally
+try:
+    k8s_config.load_kube_config()
+    core_v1 = client.CoreV1Api()
+except Exception as e:
+    logger.warning(f"Failed to load Kubernetes config: {e}. Pod creation will not work.")
+    core_v1 = None
+
 
 class TaskRunner:
     """
-    Actor component: Runs episodes in the UI environment and collects trajectories.
+    Actor component: Runs episodes in Kubernetes pods and collects trajectories.
 
-    This implementation uses the ui-verifiers API for UI interaction:
-    - POST /session: Create a new session
-    - GET /session/{id}/screenshot: Get current screenshot
-    - GET /session/{id}/act: Perform action and get resulting screenshot
-    - GET /session/{id}/progress: Get reward/progress feedback
-    - DELETE /session/{id}: Close session
+    This implementation creates dedicated Kubernetes pods for each session:
+    - Creates pod via Kubernetes API
+    - Waits for pod to be ready
+    - Communicates via proxy server: http://{cluster_host}:8000/proxy/{session_id}/*
+    - GET /proxy/{session_id}/act: Perform action and get resulting screenshot
+    - GET /proxy/{session_id}/progress: Get reward/progress feedback
+    - Deletes pod when episode completes
 
     Design decisions:
-    1. Maintains connection to remote UI environment (ui-verifiers FastAPI)
-    2. Has reference to model for inference (shared with Trainer initially)
+    1. One pod per episode (clean isolation)
+    2. Has reference to model for inference (shared with Trainer)
     3. Collects full trajectories before sending to training
     4. Handles screenshot preprocessing
     5. Uses ActionsDecoder to parse VLM outputs into API actions
 
     Responsibilities:
-    - Create UI environment sessions
+    - Create Kubernetes pods for sessions
+    - Wait for pod readiness
     - Run inference with VLM to get actions
-    - Execute actions via ui-verifiers API
+    - Execute actions via proxy server
     - Collect rewards from progress endpoint
-    - Build trajectory and send to queue when complete
+    - Delete pods when episode completes
+    - Build trajectory and return to caller
     """
 
     def __init__(
         self,
-        ui_env_url: str,
+        cluster_host: str,
+        pod_manifest_fn: Callable[[str, str], Dict],
         model: nn.Module,
         task_prompt: str,
-        session_type: str = "simple_data_entry",
+        namespace: str = "default",
         max_steps_per_episode: int = 50,
         screenshot_size: tuple = (224, 224),
         data_dir: Optional[Path] = None,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         action_format: str = "json",
-        action_delay: float = 1.0,
+        session_timeout: int = 300,
     ):
         """
         Args:
-            ui_env_url: URL of ui-verifiers FastAPI service
+            cluster_host: Kubernetes cluster proxy server host/IP
+            pod_manifest_fn: Function that generates pod manifest given (pod_name, session_id)
             model: VLM for action inference (shared reference with Trainer)
             task_prompt: Task description to send to VLM
-            session_type: Type of UI session (e.g., "simple_data_entry")
+            namespace: Kubernetes namespace for pods
             max_steps_per_episode: Maximum steps before episode terminates
             screenshot_size: Resize screenshots to this size (H, W)
             data_dir: Optional directory to save raw trajectories
             device: Device for model inference
             action_format: Format for action decoding ("json", "text", "coordinates", "natural")
-            action_delay: Delay in seconds after each action (for UI to update)
+            session_timeout: Timeout in seconds for pod to come online
         """
-        self.ui_env_url = ui_env_url.rstrip('/')
+        self.cluster_host = cluster_host
+        self.pod_manifest_fn = pod_manifest_fn
+        self.namespace = namespace
+        self.session_timeout = session_timeout
         self.model = model
         self.model.eval()  # Important: set to eval mode for inference
         self.task_prompt = task_prompt
-        self.session_type = session_type
         self.max_steps_per_episode = max_steps_per_episode
         self.screenshot_size = screenshot_size
         self.data_dir = Path(data_dir) if data_dir else None
         self.device = device
-        self.action_delay = action_delay
 
         # Action decoder for parsing VLM outputs
         self.actions_decoder = ActionsDecoder(default_format=action_format)
 
         # State for current episode
-        self.current_session_id: Optional[int] = None
+        self.current_session_id: Optional[str] = None
+        self.current_pod_name: Optional[str] = None
         self.step_count = 0
 
         if self.data_dir:
             self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"TaskRunner initialized with env: {ui_env_url}")
+        logger.info(f"TaskRunner initialized with cluster: {cluster_host}, namespace: {namespace}")
 
     def _preprocess_screenshot(self, screenshot: Image.Image) -> Image.Image:
         """
@@ -143,7 +161,7 @@ class TaskRunner:
 
     def _execute_action(self, action: Dict[str, Any]) -> tuple:
         """
-        Send action to UI environment via ui-verifiers API and get next state.
+        Send action to UI environment via proxy server and get next state.
 
         Args:
             action: Action dict to execute
@@ -154,46 +172,72 @@ class TaskRunner:
         try:
             # Convert action to API parameters
             params = self.actions_decoder.action_to_api_params(action)
-            params['delay'] = self.action_delay
 
-            # Execute action via API
-            response = requests.get(
-                f"{self.ui_env_url}/session/{self.current_session_id}/act",
-                params=params,
-                timeout=30
-            )
-            response.raise_for_status()
-
-            # Response is PNG image of screenshot after action
-            screenshot = Image.open(BytesIO(response.content))
+            # Execute action via proxy server with retries
+            # The request blocks until the pod completes the action
+            url = f"http://{self.cluster_host}:8000/proxy/{self.current_session_id}/act"
+            screenshot = self._request_with_retries(url, params, is_image=True)
 
             # Get progress/reward from separate endpoint
-            #progress_response = requests.get(
-            #    f"{self.ui_env_url}/session/{self.current_session_id}/progress",
-            #    timeout=30
-            #)
-            #logger.info(f"Progress: {progress_response}")
-            #progress_response.raise_for_status()
-            #progress_data = progress_response.json()
-            
+            progress_url = f"http://{self.cluster_host}:8000/proxy/{self.current_session_id}/progress"
+            progress_data = self._request_with_retries(progress_url, {}, is_image=False)
 
             # Calculate reward based on progress
-            # This is task-specific; for simple_data_entry it tracks correct submissions
-            #reward = self._calculate_reward(progress_data) # TODO: Protocol for progress not decided yet
-            reward = 1.0 # TODO: Protocol for progress not decided yet
+            reward = self._calculate_reward(progress_data)
 
             # Check if episode should end
-            #done = self._check_done(progress_data) # TODO: Protocol for done is not decided yet
-            done = True # TODO: Protocol for done is not decided yet
+            #done = self._check_done(progress_data)
+            done = False
 
-            #return screenshot, reward, done, progress_data
-            return screenshot, reward, done, {}
+            return screenshot, reward, done, progress_data
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Error executing action: {e}")
             # Return dummy values and mark as done due to error
             dummy_screenshot = Image.new('RGB', self.screenshot_size, color='black')
             return dummy_screenshot, -1.0, True, {"error": str(e)}
+
+    def _request_with_retries(self, url: str, params: Dict, is_image: bool, max_retries: int = 3):
+        """
+        Make HTTP request with retries for 5xx errors.
+
+        Args:
+            url: URL to request
+            params: Query parameters
+            is_image: If True, parse response as PIL Image; if False, parse as JSON
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            PIL Image or Dict depending on is_image parameter
+        """
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, params=params, timeout=30)
+
+                # Check for 5xx server errors
+                if response.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Server error {response.status_code}, retrying... (attempt {attempt + 1}/{max_retries})")
+                        continue
+                    else:
+                        response.raise_for_status()
+
+                # Check for other HTTP errors
+                response.raise_for_status()
+
+                # Parse response
+                if is_image:
+                    return Image.open(BytesIO(response.content))
+                else:
+                    return response.json()
+
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Request failed, retrying... (attempt {attempt + 1}/{max_retries}): {e}")
+                    continue
+                else:
+                    logger.error(f"Request failed after {max_retries} attempts: {e}")
+                    raise
 
     def _calculate_reward(self, progress_data: Dict[str, Any]) -> float:
         """
@@ -241,55 +285,99 @@ class TaskRunner:
 
         return False
 
-    def _create_session(self) -> int:
+    def _create_session(self) -> tuple:
         """
-        Create a new UI session via ui-verifiers API.
+        Create a new Kubernetes pod for the session.
 
         Returns:
-            Session ID
+            Tuple of (session_id, pod_name)
         """
+        if core_v1 is None:
+            raise RuntimeError("Kubernetes client not initialized. Cannot create pods.")
+
         try:
-            response = requests.post(
-                f"{self.ui_env_url}/session",
-                params={
-                    "type": self.session_type,
-                    "n": 1
-                },
-                timeout=60  # Session creation can take longer
+            # Generate unique session ID and pod name
+            session_id = str(uuid.uuid4())[:8]
+            pod_name = f"session-{session_id}"
+
+            # Create pod using provided manifest function
+            pod_manifest = self.pod_manifest_fn(pod_name, session_id)
+
+            # Create pod via Kubernetes API
+            core_v1.create_namespaced_pod(
+                namespace=self.namespace,
+                body=pod_manifest
             )
-            response.raise_for_status()
 
-            data = response.json()
-            session_id = data['session_ids'][0]
+            logger.info(f"Created pod {pod_name} with session ID {session_id}")
 
-            logger.info(f"Created session {session_id}")
-            return session_id
+            # Wait for pod to be ready
+            self._await_ready(session_id)
+            logger.info(f"Pod {pod_name} is ready")
 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error creating session: {e}")
+            return session_id, pod_name
+
+        except Exception as e:
+            logger.error(f"Error creating pod: {e}")
             raise
 
-    def _close_session(self, session_id: int):
+    def _await_ready(self, session_id: str):
         """
-        Close a UI session via ui-verifiers API.
+        Wait for pod to be ready by checking proxy endpoint.
 
         Args:
-            session_id: Session ID to close
+            session_id: Session ID to check
+
+        Raises:
+            TimeoutError: If pod doesn't become ready within session_timeout
         """
+        start_time = time.time()
+        url = f"http://{self.cluster_host}:8000/proxy/{session_id}"
+
+        while (time.time() - start_time) < self.session_timeout:
+            try:
+                resp = requests.get(url, timeout=5)
+                if resp.status_code == 200:
+                    return
+            except requests.exceptions.Timeout:
+                continue
+            except requests.exceptions.RequestException:
+                # Pod not ready yet
+                time.sleep(1)
+                continue
+
+            time.sleep(1)
+
+        raise TimeoutError(f"Pod with session {session_id} did not become ready within {self.session_timeout}s")
+
+    def _close_session(self, session_id: str, pod_name: str):
+        """
+        Delete the Kubernetes pod for this session.
+
+        Args:
+            session_id: Session ID
+            pod_name: Pod name to delete
+        """
+        if core_v1 is None:
+            logger.warning("Kubernetes client not initialized. Cannot delete pod.")
+            return
+
         try:
-            response = requests.delete(
-                f"{self.ui_env_url}/session/{session_id}",
-                timeout=30
+            core_v1.delete_namespaced_pod(
+                name=pod_name,
+                namespace=self.namespace
             )
-            response.raise_for_status()
-            logger.info(f"Closed session {session_id}")
+            logger.info(f"Deleted pod {pod_name} (session {session_id})")
 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error closing session {session_id}: {e}")
+        except Exception as e:
+            logger.error(f"Error deleting pod {pod_name}: {e}")
 
-    def _get_screenshot(self, session_id: int) -> Image.Image:
+    def _get_screenshot(self, session_id: str) -> Image.Image:
         """
-        Get screenshot from session via ui-verifiers API.
+        Get initial screenshot from session via proxy server.
+
+        This is used to get the first screenshot after pod creation.
+        Subsequent screenshots are obtained via _execute_action.
 
         Args:
             session_id: Session ID
@@ -298,17 +386,10 @@ class TaskRunner:
             PIL Image of screenshot
         """
         try:
-            response = requests.get(
-                f"{self.ui_env_url}/session/{session_id}/screenshot",
-                timeout=30
-            )
-            response.raise_for_status()
-
-            screenshot = Image.open(BytesIO(response.content))
-            
-            #screenshot.save(f"debug_screenshot_{session_id}.png")
-            #logger.info(f"Screenshot saved to debug_screenshot_{session_id}.png")
-            
+            # Get screenshot via screenshot action
+            url = f"http://{self.cluster_host}:8000/proxy/{session_id}/act"
+            params = {"action_type": "screenshot"}
+            screenshot = self._request_with_retries(url, params, is_image=True)
             return screenshot
 
         except requests.exceptions.RequestException as e:
@@ -320,11 +401,13 @@ class TaskRunner:
         """
         Run a single episode and return the complete trajectory.
 
+        Creates a Kubernetes pod, runs the episode, and deletes the pod.
+
         Returns:
             Completed trajectory with PIL Images in observations
         """
-        # Create new session
-        self.current_session_id = self._create_session()
+        # Create new session (pod)
+        self.current_session_id, self.current_pod_name = self._create_session()
 
         # Get initial screenshot (PIL Image)
         screenshot = self._get_screenshot(self.current_session_id)
@@ -342,7 +425,7 @@ class TaskRunner:
         # Reset progress tracking
         self._prev_correct_submissions = 0
 
-        logger.info(f"Starting episode in session {self.current_session_id}")
+        logger.info(f"Starting episode in pod {self.current_pod_name} (session {self.current_session_id})")
 
         try:
             while not done and step < self.max_steps_per_episode:
@@ -365,9 +448,8 @@ class TaskRunner:
                 logger.debug(f"Step {step}: action={action['action_type']}, reward={reward:.3f}, done={done}")
 
         finally:
-            # Always close session, even if error occurred
-            self._close_session(self.current_session_id)
-            #TODO: Handle logic if session ends with error
+            # Always delete pod, even if error occurred
+            self._close_session(self.current_session_id, self.current_pod_name)
 
         # Create trajectory
         total_reward = sum(rewards)
@@ -379,7 +461,7 @@ class TaskRunner:
             metadata={
                 'task_id': datetime.now().isoformat(),
                 'session_id': self.current_session_id,
-                'session_type': self.session_type,
+                'pod_name': self.current_pod_name,
                 'success': done and total_reward > 0,
                 'episode_length': step,
                 'total_reward': total_reward,
