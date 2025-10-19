@@ -1,6 +1,6 @@
 """Rejection sampling algorithm implementation."""
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import logging
 import torch
 import torch.nn as nn
@@ -53,7 +53,7 @@ class RejectionSampling(Algorithm):
 
         conversations = self._build_conversations(images, prompts, generated_texts)
         full_texts = self._render_conversations(model, conversations)
-        labels = self._tokenize_conversations(model, conversations)
+        labels = self._tokenize_conversations(model, full_texts)
 
         model_outputs = model(
             images=batch['images'],  # List[PIL.Image]
@@ -124,28 +124,94 @@ class RejectionSampling(Algorithm):
     def _tokenize_conversations(
         self,
         model: nn.Module,
-        conversations: List[List[Dict[str, Any]]]
+        full_texts: List[str]
     ) -> torch.Tensor:
         """
         Tokenize chat conversations and build language-model labels that supervise
         only the assistant portion of each message.
         """
-        processor = model.processor
-        tokenized = processor.apply_chat_template(
-            conversations,
-            add_generation_prompt=False,
-            tokenize=True,
-            return_dict=True,
-            return_assistant_tokens_mask=True,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
+        tokenizer = getattr(model, "tokenizer", None)
+        if tokenizer is None:
+            raise AttributeError("Model must expose a tokenizer for label construction.")
+
+        try:
+            encoded = tokenizer(
+                full_texts,
+                add_special_tokens=True,
+                padding=True,
+                truncation=True,
+                return_offsets_mapping=True,
+            )
+        except NotImplementedError as exc:
+            raise NotImplementedError(
+                "The configured tokenizer does not support offset_mapping, "
+                "which is required to build supervision masks for assistant tokens."
+            ) from exc
+
+        input_ids_list = encoded["input_ids"]
+        offsets_list = encoded["offset_mapping"]
+
+        batch_size = len(input_ids_list)
+        max_length = max(len(ids) for ids in input_ids_list) if input_ids_list else 0
+        labels = torch.full(
+            (batch_size, max_length),
+            fill_value=-100,
+            dtype=torch.long,
         )
 
-        input_ids = tokenized["input_ids"]
-        assistant_masks = tokenized["assistant_masks"]
+        for idx, (full_text, input_ids, offsets) in enumerate(
+            zip(full_texts, input_ids_list, offsets_list)
+        ):
+            assistant_spans = self._extract_assistant_spans(full_text)
+            if not assistant_spans:
+                logger.warning(
+                    "No assistant spans found in conversation; supervising entire sequence."
+                )
+                assistant_spans = [(0, len(full_text))]
 
-        labels = input_ids.clone()
-        labels[assistant_masks == 0] = -100
+            label_row = torch.tensor(input_ids, dtype=torch.long)
+            mask = torch.zeros(len(input_ids), dtype=torch.bool)
+
+            for token_index, (start_char, end_char) in enumerate(offsets):
+                if end_char <= start_char:
+                    continue  # Skip special tokens or padding with zero-length offsets
+
+                for span_start, span_end in assistant_spans:
+                    if start_char < span_end and end_char > span_start:
+                        mask[token_index] = True
+                        break
+
+            label_row[~mask] = -100
+            labels[idx, : len(input_ids)] = label_row
 
         return labels.to(next(model.parameters()).device)
+
+    @staticmethod
+    def _extract_assistant_spans(full_text: str) -> List[Tuple[int, int]]:
+        """
+        Identify the character spans corresponding to assistant messages within a rendered
+        conversation. We rely on the chat template markers to locate assistant content.
+        """
+        spans: List[Tuple[int, int]] = []
+        assistant_tag = "<|im_start|>assistant"
+        end_tag = "<|im_end|>"
+        search_pos = 0
+
+        while True:
+            start_idx = full_text.find(assistant_tag, search_pos)
+            if start_idx == -1:
+                break
+
+            content_start = full_text.find("\n", start_idx)
+            if content_start == -1:
+                break
+            content_start += 1
+
+            content_end = full_text.find(end_tag, content_start)
+            if content_end == -1:
+                break
+
+            spans.append((content_start, content_end))
+            search_pos = content_end + len(end_tag)
+
+        return spans
