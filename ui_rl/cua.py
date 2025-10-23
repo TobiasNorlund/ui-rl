@@ -54,6 +54,7 @@ class Rollout:
     actions: List[Action] = field(default_factory=list)
     response_messages: List[str] = field(default_factory=list)
     reward: float = 0.0
+    progress: Dict = field(default_factory=dict)
 
 
 def run_cua_session(
@@ -128,6 +129,7 @@ def run_cua_session(
 
         # Compute reward
         progress = _get_progress(cluster_host, session_id)
+        rollout.progress = progress
         rollout.reward = task.get_reward(progress)
 
         log("Finished successfully")
