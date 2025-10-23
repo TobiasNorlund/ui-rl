@@ -1,0 +1,59 @@
+# Experiment 001: Rejection Sampling Baseline
+
+experiment:
+  name: exp_001_rejection_sampling
+  description: "Baseline experiment using rejection sampling with reward threshold 0.8"
+
+training:
+  algorithm: rejection_sampling
+  num_iterations: 100
+  batch_size: 64
+  checkpoint_interval: 10
+  log_interval: 1
+
+model:
+  # HuggingFace model identifier
+  name: "Qwen/Qwen2-VL-2B-Instruct"
+
+  # Model loading options
+  torch_dtype: "float16"
+  device: "cuda"
+
+  # LoRA configuration
+  use_lora: true
+  lora_config:
+    r: 16
+    lora_alpha: 32
+    target_modules: ["q_proj", "v_proj", "k_proj", "o_proj"]
+    lora_dropout: 0.05
+    bias: "none"
+
+  # Generation parameters
+  max_new_tokens: 128
+  temperature: 0.7
+  do_sample: true
+
+  # Training options
+  freeze_vision_encoder: false
+
+  # Action format for parsing
+  action_format: "text"
+
+actor:
+  num_actors: 8
+  max_steps_per_episode: 50
+  tasks_per_iteration: 256
+
+algorithm:
+  reward_threshold: 0.8
+  learning_rate: 0.0001
+  num_epochs: 3
+
+logging:
+  log_level: INFO
+  log_dir: experiments/exp_001_rejection_sampling/logs
+  checkpoint_dir: experiments/exp_001_rejection_sampling/checkpoints
+  trajectory_dir: experiments/exp_001_rejection_sampling/trajectories
+  use_wandb: true
+  wandb_project: ui-vlm-training
+  wandb_run_name: exp_001_rejection_sampling

@@ -1,0 +1,59 @@
+# LoRA Ablation Study: MLP-Only
+#
+# This config targets only MLP layers with LoRA.
+# Research suggests MLP-only can outperform attention-only LoRA.
+
+experiment_name: "lora_ablation_mlp_only"
+
+model:
+  name: "Qwen/Qwen2.5-VL-3B-Instruct"
+  device: "cuda"
+  torch_dtype: "float16"
+
+  use_lora: true
+  lora_target_option: "mlp"  # Only gate_proj, up_proj, down_proj
+  lora_rank: 32
+  lora_alpha: 32
+  lora_dropout: 0.05
+  lora_bias: "none"
+
+  max_new_tokens: 128
+  temperature: 0.7
+  do_sample: true
+  freeze_vision_encoder: false
+
+trainer:
+  batch_size: 4
+  learning_rate: 2e-4
+  num_training_steps: 100
+  save_every: 10
+  queue_timeout: 5.0
+  algorithm: "rejection_sampling"
+  reward_threshold: 0.0
+
+actor:
+  max_steps_per_episode: 50
+  action_format: "json"
+  screenshot_size: [224, 224]
+  task_prompt: "Complete the data entry task"
+  session_type: "simple_data_entry"
+  action_delay: 1.0
+  data_dir: null
+
+actor_pool:
+  target_concurrent_actors: 2
+  max_concurrent_per_vm: 2
+  monitor_interval: 2.0
+
+environment:
+  vm_urls:
+    - "http://localhost:8000"
+  timeout: 30
+  max_retries: 3
+
+logging:
+  log_level: "INFO"
+  log_dir: "experiments/lora_ablation_mlp_only/logs"
+  checkpoint_dir: "experiments/lora_ablation_mlp_only/checkpoints"
+  trajectory_dir: null
+  verbose: false

@@ -1,0 +1,60 @@
+# Kubernetes Distributed Training Configuration
+#
+# This config demonstrates training with Kubernetes pods.
+# Useful for scaling up data collection with ActorPoolManager.
+
+experiment_name: "qwen25_vl_kubernetes"
+
+model:
+  name: "Qwen/Qwen2.5-VL-3B-Instruct"
+  device: "cuda"
+  torch_dtype: "float16"
+
+  use_lora: true
+  lora_target_option: "attention+mlp"
+  lora_rank: 32
+  lora_alpha: 32
+  lora_dropout: 0.05
+  lora_bias: "none"
+
+  max_new_tokens: 128
+  temperature: 0.7
+  do_sample: true
+  freeze_vision_encoder: false
+
+trainer:
+  batch_size: 32  # Larger batch with more VMs
+  learning_rate: null
+  num_training_steps: 500
+  save_every: 25
+  queue_timeout: 10.0  # Longer timeout with more actors
+  algorithm: "rejection_sampling"
+  reward_threshold: 0.0
+
+actor:
+  max_steps_per_episode: 50
+  action_format: "json"
+  screenshot_size: [224, 224]
+  task_prompt: "Complete the data entry task"
+  session_type: "simple_data_entry"
+  data_dir: "experiments/qwen25_vl_kubernetes/trajectories"  # Save trajectories for analysis
+
+actor_pool:
+  target_concurrent_actors: 8  # Number of parallel actors
+  monitor_interval: 2.0
+
+environment:
+  # Kubernetes cluster configuration
+  # Proxy server handles routing to individual pods by session_id
+  cluster_host: "34.123.45.67"  # Replace with your proxy server IP
+  namespace: "default"
+  timeout: 30
+  max_retries: 3
+  session_timeout: 300  # Pod startup timeout in seconds
+
+logging:
+  log_level: "INFO"
+  log_dir: "experiments/qwen25_vl_kubernetes/logs"
+  checkpoint_dir: "experiments/qwen25_vl_kubernetes/checkpoints"
+  trajectory_dir: "experiments/qwen25_vl_kubernetes/trajectories"  # Save trajectories
+  verbose: false
