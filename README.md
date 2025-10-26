@@ -18,3 +18,6 @@ kubectl get services
 # 4. Run demo script
 uv run -m ui_rl.main <proxy ip>
 ```
+
+Start vLLM model host:
+uv run -m vllm.entrypoints.openai.api_server --model ByteDance-Seed/UI-TARS-1.5-7B --limit-mm-per-prompt '{"image":10, "video":0}'

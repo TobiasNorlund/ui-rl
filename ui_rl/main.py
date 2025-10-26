@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from pathlib import Path
 from datetime import datetime
 from functools import partial
@@ -8,7 +9,7 @@ from uitars import predict_next_action
 
 
 
-def main(cluster_host: str, model_host: str):
+async def main(cluster_host: str, model_host: str):
     """
     This demo launches a simple-data-entry session pod, and generates a rollout
     using a mocked CUA inference model
@@ -19,7 +20,7 @@ def main(cluster_host: str, model_host: str):
     repo_root = Path(__file__).parent.parent
     run_dir = repo_root / "runs" / datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    rollout = run_cua_session(
+    rollout = await run_cua_session(
         task=SimpleDataEntryTask(),
         predict_next_action=partial(predict_next_action, model_host=model_host),
         cluster_host=cluster_host,
@@ -35,4 +36,4 @@ if __name__ == "__main__":
     parser.add_argument("--cluster_host", default="34.51.229.41:8000")
     parser.add_argument("--model_host", default="35.204.184.155:8000")
     args = parser.parse_args()
-    main(args.cluster_host, args.model_host)
+    asyncio.run(main(args.cluster_host, args.model_host))

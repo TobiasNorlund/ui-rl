@@ -68,8 +68,8 @@ def predict_next_action(rollout: Rollout, model_host: str) -> Action | None:
 
     response = create_response(
         host=model_host,
-        model="ui-tars",
-        #model="ByteDance-Seed/UI-TARS-1.5-7B",
+        #model="ui-tars",
+        model="ByteDance-Seed/UI-TARS-1.5-7B",
         messages=messages,
         temperature=0.1,
         max_tokens=200
@@ -87,7 +87,7 @@ def predict_next_action(rollout: Rollout, model_host: str) -> Action | None:
     logging.info(f"Action: {action_str}")
 
     if action_str in ("finished()", "call_user()"):
-        return None, None
+        return None, message["content"]
 
     return parse_action(action_str), message["content"]
 

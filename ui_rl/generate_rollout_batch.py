@@ -1,11 +1,11 @@
 import logging
 import json
 import base64
+import asyncio
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime
 from functools import partial
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from simple_data_entry import SimpleDataEntryTask
 from cua import run_cua_session, Rollout, State, Action
 from uitars import predict_next_action
@@ -41,7 +41,7 @@ def serialize_rollout(rollout: Rollout) -> dict:
     }
 
 
-def run_single_rollout(rollout_id: int, cluster_host: str, model_host: str, base_run_dir: Path, max_steps: int):
+async def run_single_rollout(rollout_id: int, cluster_host: str, model_host: str, base_run_dir: Path, max_steps: int):
     """Run a single rollout and return the result"""
     logging.info(f"Starting rollout {rollout_id}")
 
@@ -49,7 +49,7 @@ def run_single_rollout(rollout_id: int, cluster_host: str, model_host: str, base
     run_dir = base_run_dir / f"rollout_{rollout_id:03d}"
 
     try:
-        rollout = run_cua_session(
+        rollout = await run_cua_session(
             task=SimpleDataEntryTask(),
             predict_next_action=partial(predict_next_action, model_host=model_host),
             cluster_host=cluster_host,
@@ -65,14 +65,17 @@ def run_single_rollout(rollout_id: int, cluster_host: str, model_host: str, base
 
         logging.info(f"Rollout {rollout_id} completed with reward: {rollout.reward}")
         return rollout_id, rollout, None
+    except asyncio.CancelledError:
+        logging.info(f"Rollout {rollout_id} cancelled")
+        raise
     except Exception as e:
         logging.error(f"Rollout {rollout_id} failed with error: {e}")
         return rollout_id, None, e
 
 
-def main(cluster_host: str, model_host: str, n: int, max_parallel: int, max_steps: int):
+async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, max_steps: int):
     """
-    Generate N rollouts of the SimpleDataEntryTask using a ThreadPool with at most M parallel workers
+    Generate N rollouts of the SimpleDataEntryTask using asyncio with at most M parallel workers
     """
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
@@ -88,31 +91,37 @@ def main(cluster_host: str, model_host: str, n: int, max_parallel: int, max_step
     results = []
     failed = []
 
-    # Run rollouts in parallel using ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=max_parallel) as executor:
-        # Submit all rollouts
-        futures = {
-            executor.submit(
-                run_single_rollout,
-                rollout_id,
-                cluster_host,
-                model_host,
-                base_run_dir,
-                max_steps
-            ): rollout_id
-            for rollout_id in range(n)
-        }
+    # Create a semaphore to limit parallelism
+    semaphore = asyncio.Semaphore(max_parallel)
 
-        # Process completed rollouts
-        for future in as_completed(futures):
-            rollout_id, rollout, error = future.result()
+    async def run_with_semaphore(rollout_id):
+        async with semaphore:
+            return await run_single_rollout(rollout_id, cluster_host, model_host, base_run_dir, max_steps)
+
+    # Create all tasks
+    tasks = [asyncio.create_task(run_with_semaphore(rollout_id)) for rollout_id in range(n)]
+
+    try:
+        # Wait for all tasks to complete
+        for task in asyncio.as_completed(tasks):
+            rollout_id, rollout, error = await task
             if error is None:
                 results.append((rollout_id, rollout))
             else:
                 failed.append((rollout_id, error))
 
+    except asyncio.CancelledError:
+        logging.info("Received cancellation signal, cancelling all running tasks...")
+        # Cancel all remaining tasks
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        # Wait for all tasks to finish cancelling
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
     # Summary
-    logging.info("="*80)
+    logging.info("="*60)
     logging.info(f"Batch rollout generation complete!")
     logging.info(f"Total rollouts: {n}")
     logging.info(f"Successful: {len(results)}")
@@ -138,4 +147,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_steps", type=int, default=20, help="Maximum steps per rollout")
     args = parser.parse_args()
 
-    main(args.cluster_host, args.vllm_host, args.n, args.max_parallel, args.max_steps)
+    try:
+        asyncio.run(main(args.cluster_host, args.vllm_host, args.n, args.max_parallel, args.max_steps))
+    except KeyboardInterrupt:
+        logging.info("Script interrupted by user (Ctrl+C)")
+        exit(0)
