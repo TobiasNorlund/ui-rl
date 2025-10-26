@@ -21,3 +21,7 @@ uv run -m ui_rl.main <proxy ip>
 
 Start vLLM model host:
 uv run -m vllm.entrypoints.openai.api_server --model ByteDance-Seed/UI-TARS-1.5-7B --limit-mm-per-prompt '{"image":10, "video":0}'
+
+CLUSTER_HOST=`kubectl get service proxy-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`
+MODEL_HOST=localhost
+uv run ui_rl/generate_rollout_batch.py --cluster_host $CLUSTER_HOST:8000 --vllm_host $MODEL_HOST:8000 -n 1 -m 1

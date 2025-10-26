@@ -1,10 +1,10 @@
 from cua import Rollout, Action, ActionType
 from io import BytesIO
 import base64
-import requests
-import re
+import httpx
+import asyncio
 import logging
-from time import sleep
+import re
 
 
 FULL_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
@@ -36,7 +36,7 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 """
 
 
-def predict_next_action(rollout: Rollout, model_host: str) -> Action | None:
+async def predict_next_action(rollout: Rollout, model_host: str, session: httpx.AsyncClient) -> Action | None:
     messages = [
         {"role": "user", "content": FULL_PROMPT.format(user_instruction=rollout.task)},
     ]
@@ -66,13 +66,13 @@ def predict_next_action(rollout: Rollout, model_host: str) -> Action | None:
         }]
     })
 
-    response = create_response(
+    response = await create_response(
         host=model_host,
-        #model="ui-tars",
         model="ByteDance-Seed/UI-TARS-1.5-7B",
         messages=messages,
         temperature=0.1,
-        max_tokens=200
+        max_tokens=200,
+        session=session
     )
 
     if "choices" not in response or len(response["choices"]) == 0:
@@ -83,13 +83,13 @@ def predict_next_action(rollout: Rollout, model_host: str) -> Action | None:
     # Handle response message
     assert isinstance(message["content"], str), "message['content'] must be a string"
     thought, reflection, action_str = parse_response_string(message["content"])
-    logging.info(f"Thought: {thought}")
-    logging.info(f"Action: {action_str}")
+    #logging.info(f"Thought: {thought}")
+    #logging.info(f"Action: {action_str}")
 
     if action_str in ("finished()", "call_user()"):
         return None, message["content"]
 
-    return parse_action(action_str), message["content"]
+    return await parse_action(action_str), message["content"]
 
 
 def parse_response_string(response_string: str):
@@ -124,7 +124,7 @@ def parse_response_string(response_string: str):
     return thought, reflection, action_str
 
 
-def parse_action(action_str: str) -> Action | None:
+async def parse_action(action_str: str) -> Action | None:
     action_str = action_str.strip()
     if action_str.startswith("click("):
         match = re.search(r"click\(start_box='\((\d+),(\d+)\)'\)", action_str)
@@ -177,20 +177,32 @@ def parse_action(action_str: str) -> Action | None:
             raise ValueError(f"Couldn't parse action: {action_str}")
         
     elif action_str.startswith("wait()"):
-        sleep(1)
+        await asyncio.sleep(1)
 
     else:
         return None
 
 
-def create_response(host, **kwargs):
-    resp = requests.post(
-        url=f"http://{host}/v1/chat/completions",
-        headers={"Content-Type": "application/json"}, 
-        json=kwargs
-    )
-    resp.raise_for_status()
-    return resp.json()
+async def create_response(host, session: httpx.AsyncClient, **kwargs):
+    for attempt in range(3):
+        try:
+            resp = await session.post(
+                url=f"http://{host}/v1/chat/completions",
+                headers={"Content-Type": "application/json"},
+                json=kwargs,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except asyncio.CancelledError:
+            raise
+        except httpx.HTTPError as e:
+            if attempt < 2:  # Not the last attempt
+                logging.warning(f"Error predicting next action: {str(e)} (attempt {attempt + 1}/3)")
+                await asyncio.sleep(0.1)
+                continue
+            else:
+                logging.error(f"Request failed after 3 attempts: {str(e)}")
+                raise
 
     
 def encode_image_to_base64(image):
