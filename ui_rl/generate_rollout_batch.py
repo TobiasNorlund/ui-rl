@@ -114,6 +114,7 @@ async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, ma
 
         # Create initial tasks
         tasks = {asyncio.create_task(run_with_semaphore(rollout_id)) for rollout_id in range(n)}
+        total_attempts = n
 
         try:
             # Keep going until we have n successful rollouts
@@ -133,6 +134,7 @@ async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, ma
                             logging.warning(f"Rollout {rollout_id} failed, restarting it...")
                             new_task = asyncio.create_task(run_with_semaphore(rollout_id))
                             tasks.add(new_task)
+                            total_attempts += 1
 
         except asyncio.CancelledError:
             logging.info("Received cancellation signal, cancelling all running tasks...")
@@ -150,7 +152,7 @@ async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, ma
         logging.info(f"Requested rollouts: {n}")
         logging.info(f"Successful: {len(results)}")
         logging.info(f"Failed: {len(failed)}")
-        logging.info(f"Total attempts: {next_rollout_id}")
+        logging.info(f"Total attempts: {total_attempts}")
 
         if results:
             rewards = [rollout.reward for _, rollout in results]
