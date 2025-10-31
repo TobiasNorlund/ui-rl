@@ -7,8 +7,9 @@ from io import BytesIO
 from pathlib import Path
 from datetime import datetime
 from functools import partial
+from PIL import Image
 from simple_data_entry import SimpleDataEntryTask
-from cua import run_cua_session, Rollout
+from cua import run_cua_session, Rollout, State, Action, ActionType
 from uitars import predict_next_action
 
 
@@ -40,6 +41,46 @@ def serialize_rollout(rollout: Rollout) -> dict:
         "reward": rollout.reward,
         "progress": rollout.progress
     }
+
+
+def deserialize_rollout(path: Path | str) -> Rollout:
+    """Load a Rollout from a JSON file with base64-encoded images"""
+    def base64_to_image(base64_str: str) -> Image.Image:
+        """Convert base64 string to PIL Image"""
+        image_bytes = base64.b64decode(base64_str)
+        return Image.open(BytesIO(image_bytes))
+
+    # Load JSON file
+    with open(path, 'r') as f:
+        data = json.load(f)
+
+    # Reconstruct states
+    states = [
+        State(screenshot=base64_to_image(state_data["screenshot"]))
+        for state_data in data["states"]
+    ]
+
+    # Reconstruct actions
+    actions = [
+        Action(
+            action_type=ActionType(action_data["action_type"]),
+            x=action_data.get("x"),
+            y=action_data.get("y"),
+            text=action_data.get("text"),
+            keys=action_data.get("keys")
+        )
+        for action_data in data["actions"]
+    ]
+
+    # Reconstruct rollout
+    return Rollout(
+        task=data["task"],
+        states=states,
+        actions=actions,
+        response_messages=data["response_messages"],
+        reward=data["reward"],
+        progress=data["progress"]
+    )
 
 
 async def run_single_rollout(

@@ -35,14 +35,11 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 {user_instruction}
 """
 
-
-async def predict_next_action(rollout: Rollout, model_host: str, session: httpx.AsyncClient) -> Action | None:
+def rollout_to_messages(rollout: Rollout, max_imgs: int=10):
     messages = [
         {"role": "user", "content": FULL_PROMPT.format(user_instruction=rollout.task)},
     ]
 
-    # TODO: Condense long rollouts
-    max_imgs = 10
     # Take last max_imgs-1, cause we're adding the latest image below the loop
     for state, message in zip(rollout.states[-max_imgs:-1], rollout.response_messages[-max_imgs+1:]):
         messages.append({
@@ -65,6 +62,12 @@ async def predict_next_action(rollout: Rollout, model_host: str, session: httpx.
             "image_url": {"url": f"data:image/png;base64,{encode_image_to_base64(rollout.states[-1].screenshot)}"}
         }]
     })
+
+    return messages
+
+
+async def predict_next_action(rollout: Rollout, model_host: str, session: httpx.AsyncClient) -> Action | None:
+    messages = rollout_to_messages(rollout)
 
     response = await create_response(
         host=model_host,
