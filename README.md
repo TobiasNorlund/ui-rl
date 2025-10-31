@@ -20,7 +20,7 @@ uv run -m ui_rl.main <proxy ip>
 ```
 
 Start vLLM model host:
-VLLM_HTTP_TIMEOUT_KEEP_ALIVE=30 uv run -m vllm.entrypoints.openai.api_server --model ByteDance-Seed/UI-TARS-1.5-7B --limit-mm-per-prompt '{"image":10, "video":0}' --max-num-seqs 8
+VLLM_HTTP_TIMEOUT_KEEP_ALIVE=30 uv run -m vllm serve --model ByteDance-Seed/UI-TARS-1.5-7B --limit-mm-per-prompt '{"image":10, "video":0}' --max-num-seqs 8
 
 CLUSTER_HOST=`kubectl get service proxy-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`
 MODEL_HOST=localhost

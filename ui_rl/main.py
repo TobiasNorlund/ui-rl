@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime
 from functools import partial
 from simple_data_entry import SimpleDataEntryTask
-from cua import run_cua_session
+from cua import run_cua_session, load_kube_config
 from uitars import predict_next_action
 
 
@@ -15,6 +15,8 @@ async def main(cluster_host: str, model_host: str):
     using a mocked CUA inference model
     """
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+
+    load_kube_config()
 
     # Create log directory with timestamp
     repo_root = Path(__file__).parent.parent

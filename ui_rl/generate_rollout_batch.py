@@ -9,7 +9,7 @@ from datetime import datetime
 from functools import partial
 from PIL import Image
 from simple_data_entry import SimpleDataEntryTask
-from cua import run_cua_session, Rollout, State, Action, ActionType
+from cua import run_cua_session, load_kube_config, Rollout, State, Action, ActionType
 from uitars import predict_next_action
 
 
@@ -131,6 +131,8 @@ async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, ma
     """
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    load_kube_config()
 
     # Create log directory with timestamp
     repo_root = Path(__file__).parent.parent

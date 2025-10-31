@@ -15,9 +15,11 @@ from urllib.parse import quote
 from simple_data_entry import SimpleDataEntryTask
 
 
-# Load config and k10s client globally
-config.load_kube_config()
-core_v1 = client.CoreV1Api()
+def load_kube_config():
+    # Load config and k10s client globally
+    global core_v1
+    config.load_kube_config()
+    core_v1 = client.CoreV1Api()
 
 
 @dataclass
