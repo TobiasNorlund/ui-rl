@@ -153,17 +153,29 @@ async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, ma
             async with semaphore:
                 return await run_single_rollout(rollout_id, cluster_host, model_host, base_run_dir, max_steps, save_annotated_screenshots, session)
 
-        # Create all tasks
-        tasks = [asyncio.create_task(run_with_semaphore(rollout_id)) for rollout_id in range(n)]
+        # Create initial tasks
+        tasks = {asyncio.create_task(run_with_semaphore(rollout_id)) for rollout_id in range(n)}
+        total_attempts = n
 
         try:
-            # Wait for all tasks to complete
-            for task in asyncio.as_completed(tasks):
-                rollout_id, rollout, error = await task
-                if error is None:
-                    results.append((rollout_id, rollout))
-                else:
-                    failed.append((rollout_id, error))
+            # Keep going until we have n successful rollouts
+            while len(results) < n:
+                # Wait for the next task to complete
+                done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+                for task in done:
+                    rollout_id, rollout, error = await task
+                    if error is None:
+                        results.append((rollout_id, rollout))
+                        logging.info(f"Progress: {len(results)}/{n} successful rollouts")
+                    else:
+                        failed.append((rollout_id, error))
+                        # Start a new task to replace the failed one
+                        if len(results) < n:
+                            logging.warning(f"Rollout {rollout_id} failed, restarting it...")
+                            new_task = asyncio.create_task(run_with_semaphore(rollout_id))
+                            tasks.add(new_task)
+                            total_attempts += 1
 
         except asyncio.CancelledError:
             logging.info("Received cancellation signal, cancelling all running tasks...")
@@ -178,9 +190,10 @@ async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, ma
         # Summary
         logging.info("="*60)
         logging.info(f"Batch rollout generation complete!")
-        logging.info(f"Total rollouts: {n}")
+        logging.info(f"Requested rollouts: {n}")
         logging.info(f"Successful: {len(results)}")
         logging.info(f"Failed: {len(failed)}")
+        logging.info(f"Total attempts: {total_attempts}")
 
         if results:
             rewards = [rollout.reward for _, rollout in results]
