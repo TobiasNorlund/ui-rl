@@ -1,21 +1,25 @@
-import multiprocessing as mp
 import enum
-import requests
+import httpx
+import asyncio
 import io
 import uuid
 import logging
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
-from typing import List, Callable, Dict
-from collections import namedtuple
-from PIL import Image
+from typing import List, Dict, Callable
+from PIL import Image, ImageDraw, ImageFont
 from functools import partial
 from kubernetes import client, config
+from pathlib import Path
+from urllib.parse import quote
+from simple_data_entry import SimpleDataEntryTask
 
 
-# Load config and k10s client globally
-config.load_kube_config()
-core_v1 = client.CoreV1Api()
+def load_kube_config():
+    # Load config and k10s client globally
+    global core_v1
+    config.load_kube_config()
+    core_v1 = client.CoreV1Api()
 
 
 @dataclass
@@ -48,22 +52,23 @@ class Action:
 
 @dataclass
 class Rollout:
+    task: str
     states: List[State] = field(default_factory=list)
     actions: List[Action] = field(default_factory=list)
+    response_messages: List[str] = field(default_factory=list)
     reward: float = 0.0
+    progress: Dict = field(default_factory=dict)
 
 
-# TODO: Perhaps better to feed KV cache + latest state?
-ActionPredictionInput = namedtuple("ActionPredictionInput", ["rollout", "result_queue"])
-
-
-def run_cua_session(
-    pod_manifest_fn: Callable,
-    cua_inference_queue: mp.Queue,
-    reward_fn: Callable,
+async def run_cua_session(
+    task: SimpleDataEntryTask,
+    predict_next_action: Callable,
     cluster_host: str,
     max_steps: int = 10,
-    session_timeout: int = 60 * 5  # Timeout in seconds for session to come online
+    session_timeout: int = 60 * 2,  # Timeout in seconds for session to come online
+    log_dir: Path | None = None,
+    save_annotated_screenshots: bool = False,
+    session: httpx.AsyncClient = None
 ) -> Rollout:
     """
     Launches a session pod, awaits it ready, and executes a Computer Use agent in it.
@@ -71,53 +76,77 @@ def run_cua_session(
     session_id = str(uuid.uuid4())[:8]
     log = partial(_log, session_id=session_id)
     pod_name = f"session-{session_id}"
-    rollout = Rollout()
+    rollout = Rollout(task=task.get_prompt())
 
     # Create pod
     core_v1.create_namespaced_pod(
         namespace="default",
-        body=pod_manifest_fn(pod_name, session_id)
+        body=task.get_pod_manifest(pod_name, session_id)
     )
 
     try:
         log("Starting...")
-        _await_ready(cluster_host, session_id, session_timeout)
+        await _await_ready(cluster_host, session_id, session_timeout, session)
         log("Ready")
+
+        # Create log directory if specified
+        if log_dir is not None:
+            log_dir.mkdir(parents=True, exist_ok=True)
 
         # Start with screenshot
         action = Action(ActionType.Screenshot)
-        state = _act(cluster_host, session_id, action)
+        state = await _act(cluster_host, session_id, action, session)
         rollout.actions.append(action)
         rollout.states.append(state)
 
-        # Enter loop
-        prediction_result_queue = mp.Manager().Queue()
-        cua_inference_queue.put(
-            ActionPredictionInput(rollout, prediction_result_queue)
-        )
-        # TODO: Get updated KV cache?
-        while action := prediction_result_queue.get():
-            log(f"{action}")
-            state = _act(cluster_host, session_id, action)
-            rollout.actions.append(action)
-            rollout.states.append(state)
+        # Save initial screenshot
+        if save_annotated_screenshots:
+            state.screenshot.save(log_dir / f"step_{len(rollout.states)-1:03d}.png")
 
-            # Queue next action prediction
-            if len(rollout.actions) < max_steps:
-                cua_inference_queue.put(
-                    ActionPredictionInput(rollout, prediction_result_queue)
-                )
-            else:
-                break
+        step_num = len(rollout.states)
+        try:
+            font = ImageFont.truetype("arial.ttf", 32)
+        except Exception:
+            font = ImageFont.load_default()
+        
+        while action is not None and len(rollout.actions) < max_steps:
+            screenshot = rollout.states[-1].screenshot.copy()
+            log(f"Predicting action {len(rollout.actions)}")
+            action, message = await predict_next_action(rollout)
+            rollout.response_messages.append(message)
+            if action is not None:
+                log(f"{action}")
+                if save_annotated_screenshots:
+                    draw = ImageDraw.Draw(screenshot)
+                    draw.text((10, 10), str(action), fill="red", font=font)
+                    if action.x is not None and action.y is not None:
+                        radius = 10
+                        draw.ellipse(
+                            [(action.x - radius, action.y - radius),
+                                (action.x + radius, action.y + radius)],
+                            outline="red",
+                            width=3
+                        )
+                state = await _act(cluster_host, session_id, action, session)
+                rollout.actions.append(action)
+                rollout.states.append(state)
+
+            # Save screenshot
+            if save_annotated_screenshots:
+               screenshot.save(log_dir / f"step_{step_num:03d}.png")
+
+            step_num += 1
 
         # Compute reward
-        progress = _get_progress(cluster_host, session_id)
-        rollout.reward = reward_fn(progress)
+        progress = await _get_progress(cluster_host, session_id, session)
+        rollout.progress = progress
+        rollout.reward = task.get_reward(progress)
 
         log("Finished successfully")
         return rollout
     except Exception as e:
-        log(f"Failed to delete pod {pod_name}: {e}", logging.ERROR)
+        import traceback
+        log(f"ERROR in {pod_name}: {traceback.format_exc()}", level=logging.ERROR)
     finally:
         # Delete the pod
         core_v1.delete_namespaced_pod(
@@ -125,70 +154,85 @@ def run_cua_session(
             namespace='default'
         )
 
-def _await_ready(cluster_host: str, session_id: str, session_timeout: int):
+async def _await_ready(cluster_host: str, session_id: str, session_timeout: int, session: httpx.AsyncClient):
     start_time = datetime.now()
     while (datetime.now() - start_time).seconds < session_timeout:
         try:
-            resp = requests.get(f"http://{cluster_host}:8000/proxy/{session_id}", timeout=5)
+            resp = await session.get(
+                f"http://{cluster_host}/proxy/{session_id}/",
+            )
             if resp.status_code == 200:
                 break
-        except requests.exceptions.Timeout:
+            else:
+                #content = resp.content
+                #_log(f"{resp}: {content}", session_id=session_id)
+                await asyncio.sleep(2)
+        except (httpx.HTTPError, asyncio.TimeoutError):
+            await asyncio.sleep(2)
             continue
+        except asyncio.CancelledError:
+            raise
+    else:
+        raise RuntimeError(f"Session {session_id} never came up")
 
 
-def _act(cluster_host: str, session_id: str, action: Action) -> State:
+async def _act(cluster_host: str, session_id: str, action: Action, session: httpx.AsyncClient) -> State:
     """
     Acts in the session via proxy server running on k10s cluster
     """
     log = partial(_log, session_id=session_id)
-    qs = "&".join(f"{k}={v}" for k, v in asdict(action).items() if v is not None)
-    url = f"http://{cluster_host}:8000/proxy/{session_id}/act?{qs}"
-    
+    qs = "&".join(f"{k}={quote(str(v))}" for k, v in asdict(action).items() if v is not None)
+    url = f"http://{cluster_host}/proxy/{session_id}/act?{qs}"
+
     # Retry up to 3 times on 5xx errors
     for attempt in range(3):
         try:
-            resp = requests.get(url, timeout=30)
-            
+            resp = await session.get(url)
             # Check for 5xx server errors
             if resp.status_code >= 500:
                 if attempt < 2:  # Not the last attempt
-                    log(f"Server error {resp.status_code}, retrying... (attempt {attempt + 1}/3)")
+                    log(f"Error acting: HTTP {resp.status_code} {str(resp.content)} (attempt {attempt + 1}/3)", level=logging.WARNING)
                     continue
                 else:
                     resp.raise_for_status()  # Raise exception on last attempt
-            
+
             # Check for other HTTP errors
             resp.raise_for_status()
-            
+
             # Parse response bytes as PIL Image
             try:
-                image = Image.open(io.BytesIO(resp.content))
+                content = resp.content
+                image = Image.open(io.BytesIO(content))
                 return State(image)
             except Exception as e:
-                log(f"Failed to parse response as image: {e}", logging.ERROR)
+                log(f"Failed to parse response as image: {e}", level=logging.ERROR)
                 raise ValueError(f"Invalid image response: {e}")
-                
-        except requests.exceptions.RequestException as e:
+
+        except asyncio.CancelledError:
+            raise
+
+        except httpx.HTTPError as e:
             if attempt < 2:  # Not the last attempt
-                log(f"Request failed, retrying... (attempt {attempt + 1}/3): {e}")
+                log(f"Error acting: {str(e)} (attempt {attempt + 1}/3)", level=logging.WARNING)
+                await asyncio.sleep(1)
+                #breakpoint()
                 continue
             else:
-                log(f"Request failed after 3 attempts: {e}", logging.ERROR)
+                log(f"Act failed after 3 attempts: {str(e)}", level=logging.ERROR)
                 raise
 
 
-def _get_progress(cluster_host, session_id) -> Dict:
+async def _get_progress(cluster_host, session_id, session: httpx.AsyncClient) -> Dict:
     """
     Get progress information from the session pod via proxy server
     """
     log = partial(_log, session_id=session_id)
-    url = f"http://{cluster_host}:8000/proxy/{session_id}/progress"
-    
+    url = f"http://{cluster_host}/proxy/{session_id}/progress"
+
     # Retry up to 3 times on 5xx errors
     for attempt in range(3):
         try:
-            resp = requests.get(url, timeout=30)
-            
+            resp = await session.get(url)
             # Check for 5xx server errors
             if resp.status_code >= 500:
                 if attempt < 2:  # Not the last attempt
@@ -196,25 +240,27 @@ def _get_progress(cluster_host, session_id) -> Dict:
                     continue
                 else:
                     resp.raise_for_status()  # Raise exception on last attempt
-            
+
             # Check for other HTTP errors
             resp.raise_for_status()
-            
+
             # Parse response as JSON
             try:
                 progress = resp.json()
                 return progress
             except Exception as e:
-                log(f"Failed to parse progress response as JSON: {e}", logging.ERROR)
+                log(f"Failed to parse progress response as JSON: {e}", level=logging.ERROR)
                 raise ValueError(f"Invalid progress response: {e}")
-                
-        except requests.exceptions.RequestException as e:
+
+        except httpx.HTTPError as e:
             if attempt < 2:  # Not the last attempt
-                log(f"Request failed, retrying... (attempt {attempt + 1}/3): {e}")
+                log(f"Error getting progress: {str(e)} (attempt {attempt + 1}/3)", level=logging.WARNING)
+                await asyncio.sleep(1)
                 continue
             else:
-                log(f"Request failed after 3 attempts: {e}", logging.ERROR)
+                log(f"Failed getting progress after 3 attempts: {str(e)}", level=logging.ERROR)
                 raise
+
 
 def _log(msg: str, session_id: str, level=logging.INFO):
     logging.log(level=level, msg=f"CUASession {session_id}: {msg}")
