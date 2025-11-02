@@ -97,6 +97,7 @@ async def run_cua_rollout(
     except Exception as e:
         import traceback
         log(f"ERROR in {pod_name}: {traceback.format_exc()}", level=logging.ERROR)
+        raise
     finally:
         # Delete the pod
         core_v1.delete_namespaced_pod(
