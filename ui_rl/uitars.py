@@ -1,13 +1,17 @@
-from cua import Rollout, Action, ActionType
+import json
+from pathlib import Path
+from cua import Action, ActionType, State
 from io import BytesIO
 import base64
 import httpx
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
+from typing import List, Dict
 
 
-FULL_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
+UI_TARS_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
 
 ## Output Format
 ```
@@ -35,64 +39,141 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 {user_instruction}
 """
 
-def rollout_to_messages(rollout: Rollout, max_imgs: int=10):
-    messages = [
-        {"role": "user", "content": FULL_PROMPT.format(user_instruction=rollout.task)},
-    ]
 
-    # Take last max_imgs-1, cause we're adding the latest image below the loop
-    for state, message in zip(rollout.states[-max_imgs:-1], rollout.response_messages[-max_imgs+1:]):
-        messages.append({
+class UITARSRollout:
+    def __init__(
+        self, 
+        task_prompt: str, 
+        model_host: str, 
+        httpx_client: httpx.AsyncClient, 
+        max_images_in_context: int = 10,
+        max_completion_tokens: int = 200,
+        temperature: float = 0.1
+    ):
+        self._messages = [{
+            "role": "user", "content": [{
+                "type": "text",
+                "text": UI_TARS_PROMPT.format(user_instruction=task_prompt),
+             }]
+        }]
+        self._completions: List[Completion] = []
+        self._progress = None
+        self._model_host = model_host
+        self._client = httpx_client
+        self._max_images_in_context = max_images_in_context
+        self._max_completion_tokens = max_completion_tokens
+        self._temperature = temperature
+
+    @property
+    def progress(self):
+        return self._progress
+
+    @progress.setter
+    def progress(self, progress: Dict):
+        self._progress = progress
+
+    async def predict_next_action(self, new_state: State) -> Action | None:
+        # Add new state to messages list
+        self._messages.append({
             "role": "user", "content": [{
                 "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{encode_image_to_base64(state.screenshot)}"}
-            }]
-        })
-        messages.append({
-            "role": "assistant", "content": [{
-                "type": "text",
-                "text": message
+                "image_url": {"url": f"data:image/png;base64,{encode_image_to_base64(new_state.screenshot)}"}
             }]
         })
 
-    # Add last screenshot
-    messages.append({
-        "role": "user", "content": [{
-            "type": "image_url",
-            "image_url": {"url": f"data:image/png;base64,{encode_image_to_base64(rollout.states[-1].screenshot)}"}
-        }]
-    })
+        # Get messages to predict next action
+        context = self._get_completion_context()
+        response = await self._request_completion(
+            model="ByteDance-Seed/UI-TARS-1.5-7B",
+            messages=context,
+            temperature=self._temperature,
+            max_tokens=self._max_completion_tokens,
+            skip_special_tokens=False,
+            logprobs=1,
+        )
 
-    return messages
+        if "choices" not in response or len(response["choices"]) == 0:
+            raise ValueError("No output from model")
+
+        completion_message = response["choices"][0]["message"]
+        logprobs = response["choices"][0]["logprobs"]["content"]
+
+        completion = Completion(
+            context=context,
+            completion_message=completion_message,
+            logprobs=logprobs
+        )
+
+        self._messages.append(completion_message)
+        self._completions.append(completion)
+
+        # Handle response message
+        assert isinstance(completion_message["content"], str), "completion_message['content'] must be a string"
+        thought, reflection, action_str = parse_response_string(completion_message["content"])
+        if action_str in ("finished()", "call_user()"):
+            return None
+
+        return await parse_action(action_str)
+
+    def _get_completion_context(self):
+        messages = []
+        messages.append(self._messages[0]) # Add prompt message
+
+        # Add as much as possible of the message context, but cap at _max_images_in_context
+        image_messages = [i for i, m in enumerate(self._messages) if "content" in m and isinstance(m["content"], list) and any(c.get("type") == "image_url" for c in m["content"])]
+        if len(image_messages) <= self._max_images_in_context:
+            # Include all context
+            messages += self._messages[1:]
+        else:
+            # Cap to include at most _max_images_in_context
+            cap_idx = image_messages[-self._max_images_in_context]
+            messages += self._messages[cap_idx:]
+        return messages
+
+    async def _request_completion(self, **kwargs):
+        for attempt in range(3):
+            try:
+                resp = await self._client.post(
+                    url=f"http://{self._model_host}/v1/chat/completions",
+                    headers={"Content-Type": "application/json"},
+                    json=kwargs,
+                )
+                resp.raise_for_status()
+                return resp.json()
+            except asyncio.CancelledError:
+                raise
+            except httpx.HTTPError as e:
+                if attempt < 2:  # Not the last attempt
+                    logging.warning(f"Error predicting next action: {str(e)} (attempt {attempt + 1}/3)")
+                    await asyncio.sleep(0.1)
+                    continue
+                else:
+                    logging.error(f"Request failed after 3 attempts: {str(e)}")
+                    raise
+
+    def save(self, filepath: str | Path):
+        rollout_json = {
+            "messages": self._messages,
+            "completions": [
+                {
+                    "context": [self._messages.index(m) for m in completion.context],
+                    "completion": self._messages.index(completion.completion_message),
+                    "logprobs": completion.logprobs
+                }
+                for completion in self._completions
+            ],
+            "progress": self._progress
+        }
+        with open(filepath, 'w') as f:
+            json.dump(rollout_json, f)
 
 
-async def predict_next_action(rollout: Rollout, model_host: str, session: httpx.AsyncClient) -> Action | None:
-    messages = rollout_to_messages(rollout)
 
-    response = await create_response(
-        host=model_host,
-        model="ByteDance-Seed/UI-TARS-1.5-7B",
-        messages=messages,
-        temperature=0.1,
-        max_tokens=200,
-        session=session
-    )
-
-    if "choices" not in response or len(response["choices"]) == 0:
-        raise ValueError("No output from model")
-
-    message = response["choices"][0]["message"]
-
-    # Handle response message
-    assert isinstance(message["content"], str), "message['content'] must be a string"
-    thought, reflection, action_str = parse_response_string(message["content"])
-    #logging.info(f"Thought: {thought}")
-    #logging.info(f"Action: {action_str}")
-
-    if action_str in ("finished()", "call_user()"):
-        return None, message["content"]
-
-    return await parse_action(action_str), message["content"]
+@dataclass
+class Completion:
+    context: List[int]
+    completion_message: int
+    logprobs: Dict
 
 
 def parse_response_string(response_string: str):
@@ -130,7 +211,7 @@ def parse_response_string(response_string: str):
 async def parse_action(action_str: str) -> Action | None:
     action_str = action_str.strip()
     if action_str.startswith("click("):
-        match = re.search(r"click\(start_box='\((\d+),(\d+)\)'\)", action_str)
+        match = re.search(r"click\(start_box='<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>'\)", action_str)
         if match:
             x, y = int(match.group(1)), int(match.group(2))
             return Action(action_type=ActionType.LeftClick, x=x, y=y)
@@ -138,7 +219,7 @@ async def parse_action(action_str: str) -> Action | None:
             raise ValueError(f"Couldn't parse action: {action_str}")
         
     elif action_str.startswith("left_double("):
-        match = re.search(r"left_double\(start_box='\((\d+),(\d+)\)'\)", action_str)
+        match = re.search(r"left_double\(start_box='<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>'\)", action_str)
         if match:
             x, y = int(match.group(1)), int(match.group(2))
             return Action(action_type=ActionType.DoubleClick, x=x, y=y)
@@ -146,7 +227,7 @@ async def parse_action(action_str: str) -> Action | None:
             raise ValueError(f"Couldn't parse action: {action_str}")
         
     elif action_str.startswith("right_single("):
-        match = re.search(r"right_single\(start_box='\((\d+),(\d+)\)'\)", action_str)
+        match = re.search(r"right_single\(start_box='<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>'\)", action_str)
         if match:
             x, y = int(match.group(1)), int(match.group(2))
             return Action(action_type=ActionType.RightClick, x=x, y=y)
@@ -171,7 +252,7 @@ async def parse_action(action_str: str) -> Action | None:
             raise ValueError(f"Couldn't parse action: {action_str}")
         
     elif action_str.startswith("scroll("):
-        match = re.search(r"scroll\(start_box='\((\d+),(\d+)\)', direction='([^']+)'\)", action_str)
+        match = re.search(r"scroll\(start_box='<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>', direction='([^']+)'\)", action_str)
         if match:
             x, y = int(match.group(1)), int(match.group(2))
             direction = match.group(3)
@@ -184,28 +265,6 @@ async def parse_action(action_str: str) -> Action | None:
 
     else:
         return None
-
-
-async def create_response(host, session: httpx.AsyncClient, **kwargs):
-    for attempt in range(3):
-        try:
-            resp = await session.post(
-                url=f"http://{host}/v1/chat/completions",
-                headers={"Content-Type": "application/json"},
-                json=kwargs,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except asyncio.CancelledError:
-            raise
-        except httpx.HTTPError as e:
-            if attempt < 2:  # Not the last attempt
-                logging.warning(f"Error predicting next action: {str(e)} (attempt {attempt + 1}/3)")
-                await asyncio.sleep(0.1)
-                continue
-            else:
-                logging.error(f"Request failed after 3 attempts: {str(e)}")
-                raise
 
     
 def encode_image_to_base64(image):

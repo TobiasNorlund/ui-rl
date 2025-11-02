@@ -5,12 +5,11 @@ import io
 import uuid
 import logging
 from datetime import datetime
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import List, Dict, Callable
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 from functools import partial
 from kubernetes import client, config
-from pathlib import Path
 from urllib.parse import quote
 from simple_data_entry import SimpleDataEntryTask
 
@@ -50,33 +49,20 @@ class Action:
     keys: str | None = None
 
 
-@dataclass
-class Rollout:
-    task: str
-    states: List[State] = field(default_factory=list)
-    actions: List[Action] = field(default_factory=list)
-    response_messages: List[str] = field(default_factory=list)
-    reward: float = 0.0
-    progress: Dict = field(default_factory=dict)
-
-
-async def run_cua_session(
+async def run_cua_rollout(
+    rollout,
     task: SimpleDataEntryTask,
-    predict_next_action: Callable,
     cluster_host: str,
     max_steps: int = 10,
     session_timeout: int = 60 * 2,  # Timeout in seconds for session to come online
-    log_dir: Path | None = None,
-    save_annotated_screenshots: bool = False,
-    session: httpx.AsyncClient = None
-) -> Rollout:
+    httpx_client: httpx.AsyncClient = None
+):
     """
     Launches a session pod, awaits it ready, and executes a Computer Use agent in it.
     """
     session_id = str(uuid.uuid4())[:8]
     log = partial(_log, session_id=session_id)
     pod_name = f"session-{session_id}"
-    rollout = Rollout(task=task.get_prompt())
 
     # Create pod
     core_v1.create_namespaced_pod(
@@ -86,61 +72,25 @@ async def run_cua_session(
 
     try:
         log("Starting...")
-        await _await_ready(cluster_host, session_id, session_timeout, session)
+        await _await_ready(cluster_host, session_id, session_timeout, httpx_client)
         log("Ready")
 
-        # Create log directory if specified
-        if log_dir is not None:
-            log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Start with screenshot
+        # Start with getting the init state (e.g. take screenshot)
         action = Action(ActionType.Screenshot)
-        state = await _act(cluster_host, session_id, action, session)
-        rollout.actions.append(action)
-        rollout.states.append(state)
+        state = await _act(cluster_host, session_id, action, httpx_client)
 
-        # Save initial screenshot
-        if save_annotated_screenshots:
-            state.screenshot.save(log_dir / f"step_{len(rollout.states)-1:03d}.png")
+        for step_num in range(max_steps):
+            log(f"Predicting action {step_num+1}")
+            action = await rollout.predict_next_action(state)
+            if action is None:
+                break
+                
+            log(f"Taking action: {action}")
+            state = await _act(cluster_host, session_id, action, httpx_client)
 
-        step_num = len(rollout.states)
-        try:
-            font = ImageFont.truetype("arial.ttf", 32)
-        except Exception:
-            font = ImageFont.load_default()
-        
-        while action is not None and len(rollout.actions) < max_steps:
-            screenshot = rollout.states[-1].screenshot.copy()
-            log(f"Predicting action {len(rollout.actions)}")
-            action, message = await predict_next_action(rollout)
-            rollout.response_messages.append(message)
-            if action is not None:
-                log(f"{action}")
-                if save_annotated_screenshots:
-                    draw = ImageDraw.Draw(screenshot)
-                    draw.text((10, 10), str(action), fill="red", font=font)
-                    if action.x is not None and action.y is not None:
-                        radius = 10
-                        draw.ellipse(
-                            [(action.x - radius, action.y - radius),
-                                (action.x + radius, action.y + radius)],
-                            outline="red",
-                            width=3
-                        )
-                state = await _act(cluster_host, session_id, action, session)
-                rollout.actions.append(action)
-                rollout.states.append(state)
-
-            # Save screenshot
-            if save_annotated_screenshots:
-               screenshot.save(log_dir / f"step_{step_num:03d}.png")
-
-            step_num += 1
-
-        # Compute reward
-        progress = await _get_progress(cluster_host, session_id, session)
+        # Get final rollout progress
+        progress = await _get_progress(cluster_host, session_id, httpx_client)
         rollout.progress = progress
-        rollout.reward = task.get_reward(progress)
 
         log("Finished successfully")
         return rollout

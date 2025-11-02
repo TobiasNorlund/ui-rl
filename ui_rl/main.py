@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime
 from functools import partial
 from simple_data_entry import SimpleDataEntryTask
-from cua import run_cua_session, load_kube_config
+from cua import run_cua_rollout, load_kube_config
 from uitars import predict_next_action
 
 
@@ -22,7 +22,7 @@ async def main(cluster_host: str, model_host: str):
     repo_root = Path(__file__).parent.parent
     run_dir = repo_root / "runs" / datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    rollout = await run_cua_session(
+    rollout = await run_cua_rollout(
         task=SimpleDataEntryTask(),
         predict_next_action=partial(predict_next_action, model_host=model_host),
         cluster_host=cluster_host,

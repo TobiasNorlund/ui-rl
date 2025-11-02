@@ -1,86 +1,11 @@
 import logging
-import json
-import base64
 import asyncio
 import httpx
-from io import BytesIO
 from pathlib import Path
 from datetime import datetime
-from functools import partial
-from PIL import Image
 from simple_data_entry import SimpleDataEntryTask
-from cua import run_cua_session, load_kube_config, Rollout, State, Action, ActionType
-from uitars import predict_next_action
-
-
-def serialize_rollout(rollout: Rollout) -> dict:
-    """Convert a Rollout to a JSON-serializable dict with base64-encoded images"""
-    def image_to_base64(image):
-        """Convert PIL Image to base64 string"""
-        buffer = BytesIO()
-        image.save(buffer, format="PNG")
-        return base64.b64encode(buffer.getvalue()).decode('utf-8')
-
-    return {
-        "task": rollout.task,
-        "states": [
-            {"screenshot": image_to_base64(state.screenshot)}
-            for state in rollout.states
-        ],
-        "actions": [
-            {
-                "action_type": action.action_type.value,
-                "x": action.x,
-                "y": action.y,
-                "text": action.text,
-                "keys": action.keys
-            }
-            for action in rollout.actions
-        ],
-        "response_messages": rollout.response_messages,
-        "reward": rollout.reward,
-        "progress": rollout.progress
-    }
-
-
-def deserialize_rollout(path: Path | str) -> Rollout:
-    """Load a Rollout from a JSON file with base64-encoded images"""
-    def base64_to_image(base64_str: str) -> Image.Image:
-        """Convert base64 string to PIL Image"""
-        image_bytes = base64.b64decode(base64_str)
-        return Image.open(BytesIO(image_bytes))
-
-    # Load JSON file
-    with open(path, 'r') as f:
-        data = json.load(f)
-
-    # Reconstruct states
-    states = [
-        State(screenshot=base64_to_image(state_data["screenshot"]))
-        for state_data in data["states"]
-    ]
-
-    # Reconstruct actions
-    actions = [
-        Action(
-            action_type=ActionType(action_data["action_type"]),
-            x=action_data.get("x"),
-            y=action_data.get("y"),
-            text=action_data.get("text"),
-            keys=action_data.get("keys")
-        )
-        for action_data in data["actions"]
-    ]
-
-    # Reconstruct rollout
-    return Rollout(
-        task=data["task"],
-        states=states,
-        actions=actions,
-        response_messages=data["response_messages"],
-        reward=data["reward"],
-        progress=data["progress"]
-    )
+from cua import run_cua_rollout, load_kube_config
+from uitars import UITARSRollout
 
 
 async def run_single_rollout(
@@ -89,33 +14,28 @@ async def run_single_rollout(
     model_host: str,
     base_run_dir: Path,
     max_steps: int,
-    save_annotated_screenshots: bool,
-    session: httpx.AsyncClient
+    httpx_client: httpx.AsyncClient
 ):
     """Run a single rollout and return the result"""
     logging.info(f"Starting rollout {rollout_id}")
 
-    # Create subdirectory for this rollout
-    run_dir = base_run_dir / f"rollout_{rollout_id:03d}"
+    task = SimpleDataEntryTask()
+    rollout = UITARSRollout(
+        task_prompt=task.get_prompt(),
+        model_host=model_host,
+        httpx_client=httpx_client,
+    )
 
     try:
-        rollout = await run_cua_session(
-            task=SimpleDataEntryTask(),
-            predict_next_action=partial(predict_next_action, model_host=model_host, session=session),
+        await run_cua_rollout(
+            rollout=rollout,
+            task=task,
             cluster_host=cluster_host,
             max_steps=max_steps,
-            log_dir=run_dir,
-            save_annotated_screenshots=save_annotated_screenshots,
-            session=session
+            httpx_client=httpx_client
         )
-
-        # Save rollout as JSON
-        rollout_json = serialize_rollout(rollout)
-        json_path = run_dir / "rollout.json"
-        with open(json_path, 'w') as f:
-            json.dump(rollout_json, f, indent=2)
-
-        logging.info(f"Rollout {rollout_id} completed with reward: {rollout.reward}")
+        rollout.save(base_run_dir / f"rollout_{rollout_id:03d}.json")
+        logging.info(f"Rollout {rollout_id} completed")
         return rollout_id, rollout, None
     except asyncio.CancelledError:
         logging.info(f"Rollout {rollout_id} cancelled")
@@ -125,7 +45,7 @@ async def run_single_rollout(
         return rollout_id, None, e
 
 
-async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, max_steps: int, save_annotated_screenshots: bool):
+async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, max_steps: int):
     """
     Generate N rollouts of the SimpleDataEntryTask using asyncio with at most M parallel workers
     """
@@ -153,7 +73,7 @@ async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, ma
     async with httpx.AsyncClient(timeout=30) as session:
         async def run_with_semaphore(rollout_id):
             async with semaphore:
-                return await run_single_rollout(rollout_id, cluster_host, model_host, base_run_dir, max_steps, save_annotated_screenshots, session)
+                return await run_single_rollout(rollout_id, cluster_host, model_host, base_run_dir, max_steps, session)
 
         # Create initial tasks
         tasks = {asyncio.create_task(run_with_semaphore(rollout_id)) for rollout_id in range(n)}
@@ -198,7 +118,8 @@ async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, ma
         logging.info(f"Total attempts: {total_attempts}")
 
         if results:
-            rewards = [rollout.reward for _, rollout in results]
+            # TODO: SimpleDataEntry specific!
+            rewards = [rollout.progress["num_correct_submissions"] for _, rollout in results]
             logging.info(f"Average reward: {sum(rewards) / len(rewards):.2f}")
             logging.info(f"Min reward: {min(rewards):.2f}")
             logging.info(f"Max reward: {max(rewards):.2f}")
@@ -210,16 +131,15 @@ async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, ma
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate batch rollouts of SimpleDataEntryTask")
-    parser.add_argument("--cluster_host", default="34.51.229.41:8000", help="Cluster host address")
-    parser.add_argument("--vllm_host", default="35.204.184.155:8000", help="Model host address")
-    parser.add_argument("-n", "--n", type=int, default=10, help="Number of rollouts to generate")
-    parser.add_argument("-m", "--max_parallel", type=int, default=5, help="Maximum number of parallel rollouts")
+    parser.add_argument("--cluster_host", default="34.51.223.83:8000", help="Cluster host address")
+    parser.add_argument("--vllm_host", default="localhost:8000", help="Model host address")
+    parser.add_argument("-n", "--n", type=int, default=1, help="Number of rollouts to generate")
+    parser.add_argument("-m", "--max_parallel", type=int, default=1, help="Maximum number of parallel rollouts")
     parser.add_argument("--max_steps", type=int, default=20, help="Maximum steps per rollout")
-    parser.add_argument("--save-screenshots", action="store_true")
     args = parser.parse_args()
     
     try:
-        asyncio.run(main(args.cluster_host, args.vllm_host, args.n, args.max_parallel, args.max_steps, args.save_screenshots))
+        asyncio.run(main(args.cluster_host, args.vllm_host, args.n, args.max_parallel, args.max_steps))
     except KeyboardInterrupt:
         logging.info("Script interrupted by user (Ctrl+C)")
         exit(0)
