@@ -9,9 +9,11 @@ from peft import LoraConfig, get_peft_model
 import transformers.loss.loss_utils
 from tqdm import tqdm
 import wandb
+import os
+from datetime import datetime
 
 
-def main(rollouts: List[str], grad_accumulation_steps: int = 1):
+def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Optional[str] = None):
     # Monkey patch transformers fixed_cross_entropy to allow passing "reduction"
     transformers.loss.loss_utils.fixed_cross_entropy = fixed_cross_entropy
 
@@ -29,17 +31,31 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1):
     #tokenizer = AutoTokenizer.from_pretrained("ByteDance-Seed/UI-TARS-1.5-7B")
     model = load_model()
     model.train()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    lr = 1e-4
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     accelerator = Accelerator(gradient_accumulation_steps=grad_accumulation_steps)
     model, optimizer, train_dataloader, test_dataloader = accelerator.prepare(model, optimizer, train_dataloader, test_dataloader)
+
+    # Resolve default checkpoint directory (datetime-stamped) and ensure it exists
+    if output_dir is None:
+        default_root = "checkpoints"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_root = os.path.join(default_root, timestamp)
+    else:
+        output_root = output_dir
+    if accelerator.is_main_process:
+        os.makedirs(output_root, exist_ok=True)
+    accelerator.wait_for_everyone()
 
     # Initialize Weights & Biases
     if accelerator.is_main_process:
         wandb.init(project="ui-rl", config={
-            "lr": 1e-4,
+            "lr": lr,
             "batch_size": 1,
+            "grad_accum": grad_accumulation_steps,
             "train_size": train_size,
             "test_size": test_size,
+            "output_dir": output_root,
         })
     accelerator.wait_for_everyone()
 
@@ -59,34 +75,18 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1):
                     wandb.log({"train_loss": loss.item(), "epoch": epoch})
                 progress.set_postfix({"loss": f"{loss.item():.4f}"})
                 accelerator.backward(loss)
-                #loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
 
+        # Save LoRA adapter weights after each epoch (for vLLM)
+        epoch_dir = os.path.join(output_root, f"epoch_{epoch}")
+        peft_model = accelerator.unwrap_model(model)
+        peft_model.save_pretrained(epoch_dir, safe_serialization=True)
+        if accelerator.is_main_process:
+            wandb.log({"adapter_checkpoint": epoch_dir, "epoch": epoch})
+
     if accelerator.is_main_process:
         wandb.finish()
-
-    # for i, inputs in tqdm(enumerate(ds), total=len(ds)):
-    #     if i < 380:
-    #         continue
-    #     if inputs is None:
-    #         print(f"Couldn't load example {i}")
-    #         continue
-    #     batch = {k: v.to("cuda") for k, v in inputs.items() if isinstance(v, torch.Tensor)}
-    #     output = model(reduction="none", **batch)
-    #     loss = output.loss.to("cpu")
-    #     for j, completion in enumerate(inputs["completions"]):
-    #         start = completion["span"][0] - 1  # Span is shifted by one in loss
-    #         end = completion["span"][1] - 1
-    #         neg_logprobs = -torch.tensor(completion["logprobs"])
-    #         diff = loss[start:end] - neg_logprobs
-    #         if diff.mean().abs() > 1e-2 or diff.abs().max() > 1.0:
-    #             #from tabulate import tabulate
-    #             #tokens = [tokenizer.decode(token_id).__repr__() for token_id in inputs["input_ids"][0, start+1:end+1]]
-    #             #data = zip(tokens, loss[start:end], neg_logprobs, diff)
-    #             #print(tabulate(data, headers=["Token", "Loss", "Neg logprob (ref)", "Diff"]))
-    #             print(i, j, "Mean abs diff", diff.mean().abs().tolist(), "Max abs diff", diff.abs().max().tolist())
-    #             #breakpoint()
 
 
 def evaluate(model, dataloader, accelerator):
@@ -291,5 +291,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rollouts", nargs="+", default=["runs/20251102_191524/rollout_004.json"])
     parser.add_argument("--grad-accumulation-steps", type=int, default=1)
+    parser.add_argument("--output-dir", type=str, default=None)
     args = parser.parse_args()
     main(**vars(args))
