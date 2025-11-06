@@ -13,7 +13,7 @@ import os
 from datetime import datetime
 
 
-def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Optional[str] = None):
+def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Optional[str] = None, eval_checkpoint_steps: int = 100):
     # Monkey patch transformers fixed_cross_entropy to allow passing "reduction"
     transformers.loss.loss_utils.fixed_cross_entropy = fixed_cross_entropy
 
@@ -56,34 +56,40 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Opti
             "train_size": train_size,
             "test_size": test_size,
             "output_dir": output_root,
+            "eval_checkpoint_steps": eval_checkpoint_steps,
         })
     accelerator.wait_for_everyone()
 
+    global_step = 0
     for epoch in range(10):
-        # Evaluate on test set prior to each epoch
-        test_loss = evaluate(model, test_dataloader, accelerator)
-        if accelerator.is_main_process:
-            wandb.log({"test_loss": test_loss, "epoch": epoch})
-            print("Test loss:", test_loss)
-
         progress = tqdm(train_dataloader, disable=not accelerator.is_main_process)
         for batch in progress:
+            # Evaluate and checkpoint every n steps
+            if global_step % eval_checkpoint_steps == 0:
+                # Save LoRA adapter weights
+                checkpoint_dir = os.path.join(output_root, f"step_{global_step}")
+                peft_model = accelerator.unwrap_model(model)
+                peft_model.save_pretrained(checkpoint_dir, safe_serialization=True)
+                if accelerator.is_main_process:
+                    wandb.log({"adapter_checkpoint": checkpoint_dir, "epoch": epoch, "step": global_step})
+                
+                # Run eval
+                test_loss = evaluate(model, test_dataloader, accelerator)
+                if accelerator.is_main_process:
+                    wandb.log({"test_loss": test_loss, "epoch": epoch, "step": global_step})
+                    print(f"Step {global_step} - Test loss: {test_loss}")
+
             with accelerator.accumulate(model):
                 outputs = model(**batch)
                 loss = outputs.loss
                 if accelerator.is_main_process:
-                    wandb.log({"train_loss": loss.item(), "epoch": epoch})
-                progress.set_postfix({"loss": f"{loss.item():.4f}"})
+                    wandb.log({"train_loss": loss.item(), "epoch": epoch, "step": global_step})
+                progress.set_postfix({"loss": f"{loss.item():.4f}", "step": global_step})
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
+                global_step += 1
 
-        # Save LoRA adapter weights after each epoch (for vLLM)
-        epoch_dir = os.path.join(output_root, f"epoch_{epoch}")
-        peft_model = accelerator.unwrap_model(model)
-        peft_model.save_pretrained(epoch_dir, safe_serialization=True)
-        if accelerator.is_main_process:
-            wandb.log({"adapter_checkpoint": epoch_dir, "epoch": epoch})
 
     if accelerator.is_main_process:
         wandb.finish()
@@ -292,5 +298,6 @@ if __name__ == "__main__":
     parser.add_argument("--rollouts", nargs="+", default=["runs/20251102_191524/rollout_004.json"])
     parser.add_argument("--grad-accumulation-steps", type=int, default=1)
     parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--eval-checkpoint-steps", type=int, default=100)
     args = parser.parse_args()
     main(**vars(args))
