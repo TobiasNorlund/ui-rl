@@ -9,6 +9,7 @@ from peft import LoraConfig, get_peft_model
 import transformers.loss.loss_utils
 from tqdm import tqdm
 import wandb
+from copy import deepcopy
 import os
 from datetime import datetime
 
@@ -137,6 +138,12 @@ def load_dataset(rollout_paths: List[str]):
         rollout = load_rollout(rollout_path)
         seqs += get_rollout_sequences(rollout)
 
+        # TEMP: REPLACE ALL COMPLETION MESSAGES WITH DUMMY FINISHED() ACTION
+        for messages, completions_meta in seqs:
+            for completion in completions_meta:
+                messages[completion["message_idx"]]["content"] = [{"type": "text", "text": "Thought: I don't bother doing anything.\nAction: finished()"}]
+        # ------------------------------------------------------------------
+
     return RolloutDataset(seqs)
 
 
@@ -231,7 +238,7 @@ def get_rollout_sequences(rollout):
 
     output = []
     for seq, completions_metadata in seqs.items():
-        messages = [rollout["messages"][i] for i in seq]
+        messages = [deepcopy(rollout["messages"][i]) for i in seq]
         output.append((messages, completions_metadata))
     return output
 
@@ -289,7 +296,7 @@ def fixed_cross_entropy(
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rollouts", nargs="+", default=["runs/20251102_191524/rollout_004.json"])
+    parser.add_argument("--rollouts", nargs="+", default=["runs/20251103_181518/rollout_000.json"])
     parser.add_argument("--grad-accumulation-steps", type=int, default=1)
     parser.add_argument("--output-dir", type=str, default=None)
     args = parser.parse_args()
