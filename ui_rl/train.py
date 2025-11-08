@@ -5,7 +5,7 @@ from accelerate import Accelerator
 from typing import List, Optional
 from collections import defaultdict, namedtuple
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, AutoTokenizer
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, PeftModel
 import transformers.loss.loss_utils
 from tqdm import tqdm
 import wandb
@@ -19,7 +19,7 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Opti
     transformers.loss.loss_utils.fixed_cross_entropy = fixed_cross_entropy
 
     ds = load_dataset(rollouts)
-    train_size = int(0.8 * len(ds))
+    train_size = int(0.9 * len(ds))
     test_size = len(ds) - train_size
     train_dataset, test_dataset = random_split(
         ds, 
@@ -29,8 +29,23 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Opti
     train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=lambda x: x[0], num_workers=1)
     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=lambda x: x[0], num_workers=1)
 
-    #tokenizer = AutoTokenizer.from_pretrained("ByteDance-Seed/UI-TARS-1.5-7B")
-    model = load_model()
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        "ByteDance-Seed/UI-TARS-1.5-7B", 
+        dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+    )
+    model.config.use_cache = False
+    model.gradient_checkpointing_enable()
+    lora_config = LoraConfig(
+        r=64,
+        lora_alpha=64,
+        target_modules=["q_proj", "v_proj"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM"
+    )
+
+    model = get_peft_model(model, lora_config)
     model.train()
     lr = 1e-4
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -116,39 +131,11 @@ def evaluate(model, dataloader, accelerator):
     return avg_loss
 
 
-def load_model():
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        "ByteDance-Seed/UI-TARS-1.5-7B", 
-        #device_map="cuda", 
-        dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-    )
-    model.config.use_cache = False
-    model.gradient_checkpointing_enable()
-    lora_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
-        target_modules=["q_proj", "v_proj"],
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM"
-    )
-
-    model = get_peft_model(model, lora_config)
-    return model
-
-
 def load_dataset(rollout_paths: List[str]):
     seqs = []
     for rollout_path in rollout_paths:
         rollout = load_rollout(rollout_path)
         seqs += get_rollout_sequences(rollout)
-
-        # TEMP: REPLACE ALL COMPLETION MESSAGES WITH DUMMY FINISHED() ACTION
-        for messages, completions_meta in seqs:
-            for completion in completions_meta:
-                messages[completion["message_idx"]]["content"] = [{"type": "text", "text": "Thought: I don't bother doing anything.\nAction: finished()"}]
-        # ------------------------------------------------------------------
 
     return RolloutDataset(seqs)
 
@@ -187,9 +174,7 @@ class RolloutDataset(Dataset):
             # Modify the span to exactly match the tokens we want to train on
             start = span.start + message_prefix_len
             end = span.end + 1  # Include the end-of-message token
-            #assert len(completion["logprobs"]) == end - start, "Tokenized seq doesn't match reference seq"
-            if len(completion["logprobs"]) != end - start:
-                return None
+            assert len(completion["logprobs"]) == end - start, "Tokenized seq doesn't match reference seq"
             completion["span"] = (start, end)
             labels[0, start:end] = inputs["input_ids"][0, start:end]
 

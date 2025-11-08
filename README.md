@@ -1,18 +1,18 @@
 # UI Reinforcement Learning
 
-An attempt to RL fine-tune Computer Use models
-
+`ui-rl` implements Reinforcement Fine-tuning for Computer Use models. 
+Allows training on verifiable UI tasks from [ui-verifiers](https://github.com/TobiasNorlund/ui-verifiers) to improve model reliability on targeted domains and tasks.
 
 ## How to run
 
 ```bash
-# 1. Setup kubctl
+# 1. Setup kubctl to connect
 gcloud container clusters get-credentials simple-data-entry-cluster --region=europe-north2
  
 # 2. Make sure the ui-verifiers proxy server is deployed
 (cd /path/to/ui-verifiers/proxy; make deploy)
 
-# 3. Find out public/external IP of proxy server
+# 3. Find out public/external IP of proxy server (might need to wait a minute or so)
 kubectl get services
 
 # 4. Run demo script

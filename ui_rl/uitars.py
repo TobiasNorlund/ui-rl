@@ -45,10 +45,11 @@ class UITARSRollout:
         self, 
         task_prompt: str, 
         model_host: str, 
+        model_name: str,
         httpx_client: httpx.AsyncClient, 
         max_images_in_context: int = 10,
         max_completion_tokens: int = 200,
-        temperature: float = 0.1
+        temperature: float = 1.0
     ):
         self._messages = [{
             "role": "user", "content": [{
@@ -59,6 +60,7 @@ class UITARSRollout:
         self._completions: List[Completion] = []
         self._progress = None
         self._model_host = model_host
+        self._model_name = model_name
         self._client = httpx_client
         self._max_images_in_context = max_images_in_context
         self._max_completion_tokens = max_completion_tokens
@@ -84,7 +86,7 @@ class UITARSRollout:
         # Get messages to predict next action
         context = self._get_completion_context()
         response = await self._request_completion(
-            model="ByteDance-Seed/UI-TARS-1.5-7B",
+            model=self._model_name,
             messages=context,
             temperature=self._temperature,
             max_tokens=self._max_completion_tokens,

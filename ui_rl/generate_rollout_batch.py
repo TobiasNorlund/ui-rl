@@ -12,6 +12,7 @@ async def run_single_rollout(
     rollout_id: int,
     cluster_host: str,
     model_host: str,
+    model_name: str,
     base_run_dir: Path,
     max_steps: int,
     httpx_client: httpx.AsyncClient
@@ -23,7 +24,9 @@ async def run_single_rollout(
     rollout = UITARSRollout(
         task_prompt=task.get_prompt(),
         model_host=model_host,
+        model_name=model_name,
         httpx_client=httpx_client,
+        temperature=0.1
     )
 
     try:
@@ -45,7 +48,7 @@ async def run_single_rollout(
         return rollout_id, None, e
 
 
-async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, max_steps: int):
+async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_parallel: int, max_steps: int):
     """
     Generate N rollouts of the SimpleDataEntryTask using asyncio with at most M parallel workers
     """
@@ -73,7 +76,7 @@ async def main(cluster_host: str, model_host: str, n: int, max_parallel: int, ma
     async with httpx.AsyncClient(timeout=30) as session:
         async def run_with_semaphore(rollout_id):
             async with semaphore:
-                return await run_single_rollout(rollout_id, cluster_host, model_host, base_run_dir, max_steps, session)
+                return await run_single_rollout(rollout_id, cluster_host, model_host, model_name, base_run_dir, max_steps, session)
 
         # Create initial tasks
         tasks = {asyncio.create_task(run_with_semaphore(rollout_id)) for rollout_id in range(n)}
@@ -133,13 +136,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate batch rollouts of SimpleDataEntryTask")
     parser.add_argument("--cluster_host", default="34.51.223.83:8000", help="Cluster host address")
     parser.add_argument("--vllm_host", default="localhost:8000", help="Model host address")
+    parser.add_argument("--model-name", default="ByteDance-Seed/UI-TARS-1.5-7B", help="Model name in vLLM")
     parser.add_argument("-n", "--n", type=int, default=1, help="Number of rollouts to generate")
     parser.add_argument("-m", "--max_parallel", type=int, default=1, help="Maximum number of parallel rollouts")
     parser.add_argument("--max_steps", type=int, default=20, help="Maximum steps per rollout")
     args = parser.parse_args()
     
     try:
-        asyncio.run(main(args.cluster_host, args.vllm_host, args.n, args.max_parallel, args.max_steps))
+        asyncio.run(main(args.cluster_host, args.vllm_host, args.model_name, args.n, args.max_parallel, args.max_steps))
     except KeyboardInterrupt:
         logging.info("Script interrupted by user (Ctrl+C)")
         exit(0)

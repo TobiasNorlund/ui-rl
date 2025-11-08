@@ -54,7 +54,7 @@ async def run_cua_rollout(
     task: SimpleDataEntryTask,
     cluster_host: str,
     max_steps: int = 10,
-    session_timeout: int = 60 * 2,  # Timeout in seconds for session to come online
+    session_timeout: int = 60 * 3,  # Timeout in seconds for session to come online
     httpx_client: httpx.AsyncClient = None
 ):
     """
