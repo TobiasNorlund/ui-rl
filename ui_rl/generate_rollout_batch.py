@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import random
 import httpx
 from pathlib import Path
 from datetime import datetime
@@ -20,9 +21,11 @@ async def run_single_rollout(
     """Run a single rollout and return the result"""
     logging.info(f"Starting rollout {rollout_id}")
 
-    task = SimpleDataEntryTask()
+    task = SimpleDataEntryTask(
+        rows=[random.randint(2, 101)]
+    )
     rollout = UITARSRollout(
-        task_prompt=task.get_prompt(),
+        task=task,
         model_host=model_host,
         model_name=model_name,
         httpx_client=httpx_client,
@@ -122,7 +125,7 @@ async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_
 
         if results:
             # TODO: SimpleDataEntry specific!
-            rewards = [rollout.progress["num_correct_submissions"] for _, rollout in results]
+            rewards = [set(rollout.task.rows) == set(rollout.progress["submitted_row_indices"]) for _, rollout in results]
             logging.info(f"Average reward: {sum(rewards) / len(rewards):.2f}")
             logging.info(f"Min reward: {min(rewards):.2f}")
             logging.info(f"Max reward: {max(rewards):.2f}")
@@ -134,12 +137,12 @@ async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate batch rollouts of SimpleDataEntryTask")
-    parser.add_argument("--cluster_host", default="34.51.223.83:8000", help="Cluster host address")
-    parser.add_argument("--vllm_host", default="localhost:8000", help="Model host address")
+    parser.add_argument("--cluster-host", default="34.51.223.83:8000", help="Cluster host address")
+    parser.add_argument("--vllm-host", default="localhost:8000", help="Model host address")
     parser.add_argument("--model-name", default="ByteDance-Seed/UI-TARS-1.5-7B", help="Model name in vLLM")
     parser.add_argument("-n", "--n", type=int, default=1, help="Number of rollouts to generate")
-    parser.add_argument("-m", "--max_parallel", type=int, default=1, help="Maximum number of parallel rollouts")
-    parser.add_argument("--max_steps", type=int, default=20, help="Maximum steps per rollout")
+    parser.add_argument("-m", "--max-parallel", type=int, default=1, help="Maximum number of parallel rollouts")
+    parser.add_argument("--max-steps", type=int, default=20, help="Maximum steps per rollout")
     args = parser.parse_args()
     
     try:

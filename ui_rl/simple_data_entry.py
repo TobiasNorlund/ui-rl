@@ -1,15 +1,20 @@
+from typing import List
 
 
 class SimpleDataEntryTask:
 
-    def get_prompt(self):
-        return """Fill out the form on the right by copy pasting information from the FIRST data row (i.e. row no 2) in the Google Sheet on the left. 
-Do this by selecting each cell individually, copy by sending keys "ctrl+c", select the target form text input, and paste using "ctrl+v".
-Finally, click "Skicka" to submit the form."""
+    def __init__(self, rows: List):
+        self.rows = rows
 
-    def get_reward(self, progress):
-        # TODO: Improve
-        return progress["num_correct_submissions"]
+    def get_prompt(self):
+        return f"""Your task is to submit data from a spreadsheet (seen on the left) into a form (seen on the right). Specifically, the following rows are to be submitted: {", ".join(self.rows)}
+Note: You may need to scroll to make the row visible in the sheet.
+The form has to be submitted separately for each row. When the form has been submitted, return to the form to submit the next row. 
+Submit a row by selecting each cell individually, copy its content by sending keys "ctrl+c", select the target form text input and paste using "ctrl+v".
+Finally, click "Skicka" to submit the form, and continue with the next row. Only finish when all rows have been successfully submitted"""
+
+    def get_state(self):
+        return {"rows": self.rows}
 
     def get_pod_manifest(self, pod_name, session_id):
         return {

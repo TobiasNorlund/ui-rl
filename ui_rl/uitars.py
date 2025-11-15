@@ -9,6 +9,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import List, Dict
+from ui_rl.simple_data_entry import SimpleDataEntryTask
 
 
 UI_TARS_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
@@ -43,7 +44,7 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 class UITARSRollout:
     def __init__(
         self, 
-        task_prompt: str, 
+        task: SimpleDataEntryTask, 
         model_host: str, 
         model_name: str,
         httpx_client: httpx.AsyncClient, 
@@ -54,10 +55,11 @@ class UITARSRollout:
         self._messages = [{
             "role": "user", "content": [{
                 "type": "text",
-                "text": UI_TARS_PROMPT.format(user_instruction=task_prompt),
+                "text": UI_TARS_PROMPT.format(user_instruction=task.get_prompt()),
              }]
         }]
         self._completions: List[Completion] = []
+        self._task = task
         self._progress = None
         self._model_host = model_host
         self._model_name = model_name
@@ -155,6 +157,7 @@ class UITARSRollout:
 
     def save(self, filepath: str | Path):
         rollout_json = {
+            "task": self._task.get_state(),
             "messages": self._messages,
             "completions": [
                 {
