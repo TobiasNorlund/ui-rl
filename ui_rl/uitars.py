@@ -9,7 +9,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import List, Dict
-from ui_rl.simple_data_entry import SimpleDataEntryTask
+from simple_data_entry import SimpleDataEntryTask
 
 
 UI_TARS_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
@@ -257,13 +257,30 @@ async def parse_action(action_str: str) -> Action | None:
             raise ValueError(f"Couldn't parse action: {action_str}")
         
     elif action_str.startswith("scroll("):
-        match = re.search(r"scroll\(start_box='<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>', direction='([^']+)'\)", action_str)
-        if match:
-            x, y = int(match.group(1)), int(match.group(2))
-            direction = match.group(3)
-            raise NotImplementedError()
+        # 1. Regex to extract start_box coordinates (x and y)
+        box_regex = r"start_box='<\|box_start\|>\((?P<x>\d+),(?P<y>\d+)\)<\|box_end\|>'"
+        box_match = re.search(box_regex, action_str)
+
+        # 2. Regex to extract direction
+        direction_regex = r"direction='(?P<direction>[^']+)'"
+        direction_match = re.search(direction_regex, action_str)
+
+        # Check if both required parts were found
+        if box_match and direction_match:
+            try:
+                # Extract and convert coordinates
+                x = int(box_match.group('x'))
+                y = int(box_match.group('y'))
+                
+                # Extract direction
+                direction = direction_match.group('direction')
+                
+                return Action(action_type=ActionType.Scroll, direction=direction, x=x, y=y)
+            except ValueError as e:
+                # Catch potential errors during integer conversion
+                raise ValueError(f"Error converting coordinates in action: {action_str}. Details: {e}")
         else:
-            raise ValueError(f"Couldn't parse action: {action_str}")
+            raise ValueError(f"Couldn't parse all required arguments in action: {action_str}")
         
     elif action_str.startswith("wait()"):
         await asyncio.sleep(1)

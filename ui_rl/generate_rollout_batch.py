@@ -62,7 +62,7 @@ async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_
 
     # Create log directory with timestamp
     repo_root = Path(__file__).parent.parent
-    base_run_dir = repo_root / "runs" / datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_run_dir = repo_root / "rollouts" / datetime.now().strftime("%Y%m%d_%H%M%S")
     base_run_dir.mkdir(parents=True, exist_ok=True)
 
     logging.info(f"Starting {n} rollouts with max {max_parallel} parallel workers")
@@ -125,7 +125,7 @@ async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_
 
         if results:
             # TODO: SimpleDataEntry specific!
-            rewards = [set(rollout.task.rows) == set(rollout.progress["submitted_row_indices"]) for _, rollout in results]
+            rewards = [set(i-2 for i in rollout._task.rows) == set(rollout.progress["submitted_row_indices"]) for _, rollout in results]
             logging.info(f"Average reward: {sum(rewards) / len(rewards):.2f}")
             logging.info(f"Min reward: {min(rewards):.2f}")
             logging.info(f"Max reward: {max(rewards):.2f}")

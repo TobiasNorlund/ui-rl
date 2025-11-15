@@ -24,4 +24,4 @@ VLLM_HTTP_TIMEOUT_KEEP_ALIVE=30 uv run vllm serve ByteDance-Seed/UI-TARS-1.5-7B 
 
 CLUSTER_HOST=`kubectl get service proxy-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`
 MODEL_HOST=localhost
-uv run ui_rl/generate_rollout_batch.py --cluster_host $CLUSTER_HOST:8000 --vllm_host $MODEL_HOST:8000 -n 20 -m 15
+uv run ui_rl/generate_rollout_batch.py --cluster-host $CLUSTER_HOST:8000 --vllm-host $MODEL_HOST:8000 -n 20 -m 15

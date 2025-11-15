@@ -35,6 +35,7 @@ class ActionType(enum.StrEnum):
     TripleClick = "triple_click"
     Type = "type"
     Keys = "keys"
+    Scroll = "scroll"
 
     def __repr__(self):
         return f"{self.__class__.__name__}.{self.name}"
@@ -47,6 +48,7 @@ class Action:
     y: int | None = None
     text: str | None = None
     keys: str | None = None
+    direction: str | None = None
 
 
 async def run_cua_rollout(
