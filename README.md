@@ -5,6 +5,8 @@ Allows training on verifiable UI tasks from [ui-verifiers](https://github.com/To
 
 ## How to run
 
+Tested on a machine with one A100 80GB
+
 ```bash
 # 1. Setup kubctl to connect
 gcloud container clusters get-credentials simple-data-entry-cluster --region=europe-north2
@@ -15,13 +17,17 @@ gcloud container clusters get-credentials simple-data-entry-cluster --region=eur
 # 3. Find out public/external IP of proxy server (might need to wait a minute or so)
 kubectl get services
 
-# 4. Run demo script
-uv run -m ui_rl.main <proxy ip>
-```
-
-Start vLLM model host:
+# 4. Start vLLM model host
 VLLM_HTTP_TIMEOUT_KEEP_ALIVE=30 uv run vllm serve ByteDance-Seed/UI-TARS-1.5-7B --limit-mm-per-prompt '{"image":10, "video":0}' --max-num-seqs 8
 
+# 5. Generate a batch of rollouts
 CLUSTER_HOST=`kubectl get service proxy-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`
 MODEL_HOST=localhost
 uv run ui_rl/generate_rollout_batch.py --cluster-host $CLUSTER_HOST:8000 --vllm-host $MODEL_HOST:8000 -n 20 -m 15
+
+# 6. Select the rollouts that were successful
+for f in rollouts/20251116_161543/rollout_*.json; do if [ "$(jq '.progress.submitted_row_indices[0] == (.task.rows[0]-2)' "$f")" == "true" ]; then echo "$f"; fi; done > rollouts/20251116_161543/successful.txt
+
+# 7. Run SFT on the successful rollouts (=rejection sampling)
+uv run ui_rl/train.py --rollout $(cat rollouts/20251116_161543/successful.txt) --grad-accumulation-steps 8 --eval-checkpoint-steps 200
+```

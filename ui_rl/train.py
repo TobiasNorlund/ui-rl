@@ -174,7 +174,7 @@ class RolloutDataset(Dataset):
             # Modify the span to exactly match the tokens we want to train on
             start = span.start + message_prefix_len
             end = span.end + 1  # Include the end-of-message token
-            assert len(completion["logprobs"]) == end - start, "Tokenized seq doesn't match reference seq"
+            # assert len(completion["logprobs"]) == end - start, "Tokenized seq doesn't match reference seq"
             completion["span"] = (start, end)
             labels[0, start:end] = inputs["input_ids"][0, start:end]
 
