@@ -6,6 +6,9 @@ class SimpleDataEntryTask:
     def __init__(self, rows: List):
         self.rows = rows
 
+    def __str__(self):
+        return f"SimpleDataEntryTask(rows={str(self.rows)})"
+
     def get_prompt(self):
         return f"""Your task is to submit data from a spreadsheet (seen on the left) into a form (seen on the right). Specifically, the following rows (as numbered in the left margin) from the spreadsheet are to be submitted: {", ".join(str(i) for i in self.rows)}.
 Note: You may need to scroll to make the row visible in the sheet.

@@ -69,6 +69,10 @@ class UITARSRollout:
         self._temperature = temperature
 
     @property
+    def task(self):
+        return self._task
+
+    @property
     def progress(self):
         return self._progress
 

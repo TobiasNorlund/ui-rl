@@ -11,19 +11,16 @@ from uitars import UITARSRollout
 
 async def run_single_rollout(
     rollout_id: int,
+    task: SimpleDataEntryTask,
     cluster_host: str,
     model_host: str,
     model_name: str,
-    base_run_dir: Path,
     max_steps: int,
     httpx_client: httpx.AsyncClient
 ):
     """Run a single rollout and return the result"""
-    logging.info(f"Starting rollout {rollout_id}")
+    logging.info(f"Starting UITARS rollout for task: {task}")
 
-    task = SimpleDataEntryTask(
-        rows=[random.randint(2, 101)]
-    )
     rollout = UITARSRollout(
         task=task,
         model_host=model_host,
@@ -35,12 +32,10 @@ async def run_single_rollout(
     try:
         await run_cua_rollout(
             rollout=rollout,
-            task=task,
             cluster_host=cluster_host,
             max_steps=max_steps,
             httpx_client=httpx_client
         )
-        rollout.save(base_run_dir / f"rollout_{rollout_id:03d}.json")
         logging.info(f"Rollout {rollout_id} completed")
         return rollout_id, rollout, None
     except asyncio.CancelledError:
@@ -53,11 +48,8 @@ async def run_single_rollout(
 
 async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_parallel: int, max_steps: int):
     """
-    Generate N rollouts of the SimpleDataEntryTask using asyncio with at most M parallel workers
+    Run single-row Simple Data Entry rollouts until at least N successful rollouts are generated for each row
     """
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-
     load_kube_config()
 
     # Create log directory with timestamp
@@ -65,45 +57,84 @@ async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_
     base_run_dir = repo_root / "rollouts" / datetime.now().strftime("%Y%m%d_%H%M%S")
     base_run_dir.mkdir(parents=True, exist_ok=True)
 
-    logging.info(f"Starting {n} rollouts with max {max_parallel} parallel workers")
+    log_file = base_run_dir / "output.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(log_file, mode='a')
+        ]
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+    logging.info(f"Starting generation of {n} successful rollouts for each row, using {max_parallel} parallel workers")
     logging.info(f"Logs will be saved to: {base_run_dir}")
 
-    # Collect results
-    results = []
-    failed = []
+    # Result counter
+    ROW_MIN = 87
+    ROW_MAX = 101
+    finished_counter = {
+        row: 0
+        for row in range(ROW_MIN, ROW_MAX+1)
+    }
 
-    # Create a semaphore to limit parallelism
-    semaphore = asyncio.Semaphore(max_parallel)
+    def get_next_row():
+        for row in range(ROW_MIN, ROW_MAX+1):
+            if finished_counter[row] < n:
+                return row
+        else:
+            return None
 
     # Create global httpx session
     async with httpx.AsyncClient(timeout=30) as session:
-        async def run_with_semaphore(rollout_id):
-            async with semaphore:
-                return await run_single_rollout(rollout_id, cluster_host, model_host, model_name, base_run_dir, max_steps, session)
-
         # Create initial tasks
-        tasks = {asyncio.create_task(run_with_semaphore(rollout_id)) for rollout_id in range(n)}
-        total_attempts = n
+        tasks = set()
+        for next_rollout_id in range(1, max_parallel+1):
+            if (next_row := get_next_row()) is not None:
+                tasks.add(
+                    asyncio.create_task(
+                        run_single_rollout(next_rollout_id, SimpleDataEntryTask([next_row]), cluster_host, model_host, model_name, max_steps, session)
+                    )
+                )
+            else:
+                break
 
         try:
-            # Keep going until we have n successful rollouts
-            while len(results) < n:
+            while True:
                 # Wait for the next task to complete
                 done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 
                 for task in done:
                     rollout_id, rollout, error = await task
                     if error is None:
-                        results.append((rollout_id, rollout))
-                        logging.info(f"Progress: {len(results)}/{n} successful rollouts")
+                        rollout_row = rollout.task.rows[0]
+                        # If success
+                        if set(rollout.progress["submitted_row_indices"]) == set([rollout_row-2]):
+                            finished_counter[rollout_row] += 1
+                            rollout.save(base_run_dir / f"rollout_{rollout_row}_{finished_counter[rollout_row]}_success.json")
+                            logging.info(f"Successful rollout for row {rollout_row}: {finished_counter[rollout_row]} / {n}")
+                        else:
+                            logging.info(f"Unsuccessful rollout for row {rollout_row}: {finished_counter[rollout_row]} / {n}")
+                            rollout.save(base_run_dir / f"rollout_{rollout_row}_fail_{rollout_id}.json")
                     else:
-                        failed.append((rollout_id, error))
-                        # Start a new task to replace the failed one
-                        if len(results) < n:
-                            logging.warning(f"Rollout {rollout_id} failed, restarting it...")
-                            new_task = asyncio.create_task(run_with_semaphore(rollout_id))
-                            tasks.add(new_task)
-                            total_attempts += 1
+                        logging.warning(f"Rollout {rollout_id} failed")
+                    
+                    # Start next rollout
+                    if (next_row := get_next_row()) is not None:
+                        next_rollout_id += 1
+                        tasks.add(
+                            asyncio.create_task(
+                                run_single_rollout(next_rollout_id, SimpleDataEntryTask([next_row]), cluster_host, model_host, model_name, max_steps, session)
+                            )
+                        )
+                    else:
+                        break
+                else:
+                    continue
+                if len(tasks) == 0:
+                    break # Only hits this if inner loop breaks out and there are no more remaining tasks
 
         except asyncio.CancelledError:
             logging.info("Received cancellation signal, cancelling all running tasks...")
@@ -118,20 +149,6 @@ async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_
         # Summary
         logging.info("="*60)
         logging.info(f"Batch rollout generation complete!")
-        logging.info(f"Requested rollouts: {n}")
-        logging.info(f"Successful: {len(results)}")
-        logging.info(f"Failed: {len(failed)}")
-        logging.info(f"Total attempts: {total_attempts}")
-
-        if results:
-            # TODO: SimpleDataEntry specific!
-            rewards = [set(i-2 for i in rollout._task.rows) == set(rollout.progress["submitted_row_indices"]) for _, rollout in results]
-            logging.info(f"Average reward: {sum(rewards) / len(rewards):.2f}")
-            logging.info(f"Min reward: {min(rewards):.2f}")
-            logging.info(f"Max reward: {max(rewards):.2f}")
-
-        if failed:
-            logging.info(f"Failed rollout IDs: {[rollout_id for rollout_id, _ in failed]}")
 
 
 if __name__ == "__main__":

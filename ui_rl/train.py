@@ -19,7 +19,7 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Opti
     transformers.loss.loss_utils.fixed_cross_entropy = fixed_cross_entropy
 
     ds = load_dataset(rollouts)
-    train_size = int(0.9 * len(ds))
+    train_size = int(0.95 * len(ds))
     test_size = len(ds) - train_size
     train_dataset, test_dataset = random_split(
         ds, 
