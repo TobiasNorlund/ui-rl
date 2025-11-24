@@ -1,4 +1,3 @@
 __pycache__
-rollouts/
 wandb/
-checkpoints/
+data/
