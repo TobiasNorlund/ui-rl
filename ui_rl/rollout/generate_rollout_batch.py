@@ -1,11 +1,12 @@
 import logging
 import asyncio
-import random
+import re
 import httpx
 from pathlib import Path
 from datetime import datetime
 from simple_data_entry import SimpleDataEntryTask
 from cua import run_cua_rollout, load_kube_config
+from strategy import Strategy, FixedStrategy, NSuccessfulStrategy
 from uitars import UITARSRollout
 
 
@@ -46,7 +47,7 @@ async def run_single_rollout(
         return rollout_id, None, e
 
 
-async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_parallel: int, max_steps: int):
+async def main(cluster_host: str, model_host: str, model_name: str, strategy_str: str, max_parallel: int, max_steps: int):
     """
     Run single-row Simple Data Entry rollouts until at least N successful rollouts are generated for each row
     """
@@ -68,34 +69,20 @@ async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
+    strategy = parse_strategy(strategy_str)
 
-    logging.info(f"Starting generation of {n} successful rollouts for each row, using {max_parallel} parallel workers")
+    logging.info(f"Starting generation of rollouts, using {max_parallel} parallel workers")
     logging.info(f"Logs will be saved to: {base_run_dir}")
-
-    # Result counter
-    ROW_MIN = 87
-    ROW_MAX = 101
-    finished_counter = {
-        row: 0
-        for row in range(ROW_MIN, ROW_MAX+1)
-    }
-
-    def get_next_row():
-        for row in range(ROW_MIN, ROW_MAX+1):
-            if finished_counter[row] < n:
-                return row
-        else:
-            return None
 
     # Create global httpx session
     async with httpx.AsyncClient(timeout=30) as session:
         # Create initial tasks
-        tasks = set()
+        asyncio_tasks = set()
         for next_rollout_id in range(1, max_parallel+1):
-            if (next_row := get_next_row()) is not None:
-                tasks.add(
+            if (next_task := strategy.next_task()) is not None:
+                asyncio_tasks.add(
                     asyncio.create_task(
-                        run_single_rollout(next_rollout_id, SimpleDataEntryTask([next_row]), cluster_host, model_host, model_name, max_steps, session)
+                        run_single_rollout(next_rollout_id, next_task, cluster_host, model_host, model_name, max_steps, session)
                     )
                 )
             else:
@@ -104,7 +91,7 @@ async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_
         try:
             while True:
                 # Wait for the next task to complete
-                done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                done, asyncio_tasks = await asyncio.wait(asyncio_tasks, return_when=asyncio.FIRST_COMPLETED)
 
                 for task in done:
                     rollout_id, rollout, error = await task
@@ -112,38 +99,38 @@ async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_
                         rollout_row = rollout.task.rows[0]
                         # If success
                         if set(rollout.progress["submitted_row_indices"]) == set([rollout_row-2]):
-                            finished_counter[rollout_row] += 1
-                            rollout.save(base_run_dir / f"rollout_{rollout_row}_{finished_counter[rollout_row]}_success.json")
-                            logging.info(f"Successful rollout for row {rollout_row}: {finished_counter[rollout_row]} / {n}")
+                            strategy.on_success(rollout.task)
+                            rollout.save(base_run_dir / f"rollout_{rollout_id}_success.json")
+                            logging.info(f"Successful rollout for task {rollout.task}")
                         else:
-                            logging.info(f"Unsuccessful rollout for row {rollout_row}: {finished_counter[rollout_row]} / {n}")
-                            rollout.save(base_run_dir / f"rollout_{rollout_row}_fail_{rollout_id}.json")
+                            logging.info(f"Failed rollout for task {rollout.task}")
+                            rollout.save(base_run_dir / f"rollout_{rollout_id}_fail.json")
                     else:
-                        logging.warning(f"Rollout {rollout_id} failed")
+                        logging.warning(f"Rollout {rollout_id} was interrupted due to an unrecoverable error")
                     
                     # Start next rollout
-                    if (next_row := get_next_row()) is not None:
+                    if (next_task := strategy.next_task()) is not None:
                         next_rollout_id += 1
-                        tasks.add(
+                        asyncio_tasks.add(
                             asyncio.create_task(
-                                run_single_rollout(next_rollout_id, SimpleDataEntryTask([next_row]), cluster_host, model_host, model_name, max_steps, session)
+                                run_single_rollout(next_rollout_id, next_task, cluster_host, model_host, model_name, max_steps, session)
                             )
                         )
                     else:
                         break
                 else:
                     continue
-                if len(tasks) == 0:
+                if len(asyncio_tasks) == 0:
                     break # Only hits this if inner loop breaks out and there are no more remaining tasks
 
         except asyncio.CancelledError:
             logging.info("Received cancellation signal, cancelling all running tasks...")
             # Cancel all remaining tasks
-            for task in tasks:
+            for task in asyncio_tasks:
                 if not task.done():
                     task.cancel()
             # Wait for all tasks to finish cancelling
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await asyncio.gather(*asyncio_tasks, return_exceptions=True)
             raise
 
         # Summary
@@ -151,19 +138,50 @@ async def main(cluster_host: str, model_host: str, model_name: str, n: int, max_
         logging.info(f"Batch rollout generation complete!")
 
 
+def parse_strategy(strategy: str) -> Strategy:
+    def _get_ids(ids: str):
+        ids = set()
+        for id_group in ids.split(","):
+            if "-" in id_group:
+                ids.update(range(int(id_group[0]), int(id_group[1])+1))
+            else:
+                ids.add(int(id_group))
+        return ids
+
+    match strategy:
+        case s if (m := re.match(r"fixed\((?P<ids>\S+)\)", s)):
+            ids = _get_ids(m.group("ids"))
+            return FixedStrategy(tasks=[
+                SimpleDataEntryTask(row=[id])
+                for id in ids
+            ])
+        case s if (m := re.match(r"nsuccess\((?P<ids>\S+);(?P<min_successful>\d+);(?P<max_attempts>\d+)\)", s)):
+            ids = _get_ids(m.group("ids"))
+            return NSuccessfulStrategy(
+                tasks=[
+                    SimpleDataEntryTask(row=[id])
+                    for id in ids
+                ], 
+                min_successful=int(m.group("min_successful")), 
+                max_attempts=int(m.group("max_attempts"))
+            )
+        case _:
+            raise ValueError("Invalid strategy")
+            
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate batch rollouts of SimpleDataEntryTask")
     parser.add_argument("--cluster-host", default="34.51.223.83:8000", help="Cluster host address")
     parser.add_argument("--vllm-host", default="localhost:8000", help="Model host address")
     parser.add_argument("--model-name", default="ByteDance-Seed/UI-TARS-1.5-7B", help="Model name in vLLM")
-    parser.add_argument("-n", "--n", type=int, default=1, help="Number of rollouts to generate")
-    parser.add_argument("-m", "--max-parallel", type=int, default=1, help="Maximum number of parallel rollouts")
+    parser.add_argument("--strategy", required=True)
+    parser.add_argument("--max-parallel", type=int, default=1, help="Maximum number of parallel rollouts")
     parser.add_argument("--max-steps", type=int, default=20, help="Maximum steps per rollout")
     args = parser.parse_args()
     
     try:
-        asyncio.run(main(args.cluster_host, args.vllm_host, args.model_name, args.n, args.max_parallel, args.max_steps))
+        asyncio.run(main(args.cluster_host, args.vllm_host, args.model_name, args.strategy, args.max_parallel, args.max_steps))
     except KeyboardInterrupt:
         logging.info("Script interrupted by user (Ctrl+C)")
         exit(0)
