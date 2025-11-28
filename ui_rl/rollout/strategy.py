@@ -12,22 +12,28 @@ class Strategy(ABC):
     def on_success(self, task):
         pass
 
+    def on_error(self, task):
+        pass
+
 
 class FixedStrategy(Strategy):
     """
     Generate rollouts for a fixed set of tasks, irregardless of how many succeeds
     """
 
-    def __init__(self, tasks):
-        self._tasks = tasks
-        self._next_task_index = 0
+    def __init__(self, tasks, rerun_on_error=False):
+        self._tasks = list(tasks)
+        self._rerun_on_error = rerun_on_error
 
     def next_task(self):
-        if self._next_task_index < len(self._tasks):
-            self._next_task_index += 1
-            return self._tasks[self._next_task_index-1]
+        if len(self._tasks) > 0:
+            return self._tasks.pop(0)
         else:
             return None
+
+    def on_error(self, task):
+        if self._rerun_on_error:
+            self._tasks.insert(0, task)
 
 
 class NSuccessfulStrategy(Strategy):

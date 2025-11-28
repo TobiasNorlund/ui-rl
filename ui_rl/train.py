@@ -1,3 +1,4 @@
+from pathlib import Path
 import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 import json
@@ -14,7 +15,7 @@ import os
 from datetime import datetime
 
 
-def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Optional[str] = None, eval_checkpoint_steps: int = 100):
+def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Optional[str] = None, eval_checkpoint_steps: int = 100, lora_adapter_path: Optional[str] = None):
     # Monkey patch transformers fixed_cross_entropy to allow passing "reduction"
     transformers.loss.loss_utils.fixed_cross_entropy = fixed_cross_entropy
 
@@ -29,24 +30,38 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Opti
     train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=lambda x: x[0], num_workers=1)
     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=lambda x: x[0], num_workers=1)
 
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        "ByteDance-Seed/UI-TARS-1.5-7B", 
-        dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-    )
+    # Load model
+    if lora_adapter_path is not None:
+        # Continue training from an existing LoRA adapter
+        print(f"Loading LoRA adapter from: {lora_adapter_path}")
+        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            "ByteDance-Seed/UI-TARS-1.5-7B",
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+        )
+        model = PeftModel.from_pretrained(model, lora_adapter_path, is_trainable=True)
+    else:
+        # Start fresh with new LoRA adapter
+        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            "ByteDance-Seed/UI-TARS-1.5-7B",
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+        )
+        lora_config = LoraConfig(
+            r=64,
+            lora_alpha=64,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+        model = get_peft_model(model, lora_config)    
+
     model.config.use_cache = False
     model.gradient_checkpointing_enable()
-    lora_config = LoraConfig(
-        r=64,
-        lora_alpha=64,
-        target_modules=["q_proj", "v_proj"],
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM"
-    )
-
-    model = get_peft_model(model, lora_config)
+    model.enable_input_require_grads()
     model.train()
+
     lr = 1e-4
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     accelerator = Accelerator(gradient_accumulation_steps=grad_accumulation_steps)
@@ -54,9 +69,8 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Opti
 
     # Resolve default checkpoint directory (datetime-stamped) and ensure it exists
     if output_dir is None:
-        default_root = "checkpoints"
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_root = os.path.join(default_root, timestamp)
+        repo_root = Path(__file__).parent.parent
+        output_root = repo_root / "data" / "checkpoints" / datetime.now().strftime("%Y%m%d_%H%M%S")
     else:
         output_root = output_dir
     if accelerator.is_main_process:
@@ -291,5 +305,6 @@ if __name__ == "__main__":
     parser.add_argument("--grad-accumulation-steps", type=int, default=1)
     parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--eval-checkpoint-steps", type=int, default=100)
+    parser.add_argument("--lora-adapter-path", type=str, default=None, help="Path to existing LoRA adapter to continue training from")
     args = parser.parse_args()
     main(**vars(args))

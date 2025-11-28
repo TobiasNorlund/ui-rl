@@ -54,8 +54,8 @@ async def main(cluster_host: str, model_host: str, model_name: str, strategy_str
     load_kube_config()
 
     # Create log directory with timestamp
-    repo_root = Path(__file__).parent.parent
-    base_run_dir = repo_root / "rollouts" / datetime.now().strftime("%Y%m%d_%H%M%S")
+    repo_root = Path(__file__).parent.parent.parent
+    base_run_dir = repo_root / "data" / "rollouts" / datetime.now().strftime("%Y%m%d_%H%M%S")
     base_run_dir.mkdir(parents=True, exist_ok=True)
 
     log_file = base_run_dir / "output.log"
@@ -100,13 +100,14 @@ async def main(cluster_host: str, model_host: str, model_name: str, strategy_str
                         # If success
                         if set(rollout.progress["submitted_row_indices"]) == set([rollout_row-2]):
                             strategy.on_success(rollout.task)
-                            rollout.save(base_run_dir / f"rollout_{rollout_id}_success.json")
+                            rollout.save(base_run_dir / f"rollout_{rollout_id:04d}_success.json")
                             logging.info(f"Successful rollout for task {rollout.task}")
                         else:
                             logging.info(f"Failed rollout for task {rollout.task}")
-                            rollout.save(base_run_dir / f"rollout_{rollout_id}_fail.json")
+                            rollout.save(base_run_dir / f"rollout_{rollout_id:04d}_fail.json")
                     else:
                         logging.warning(f"Rollout {rollout_id} was interrupted due to an unrecoverable error")
+                        strategy.on_error(rollout.task)
                     
                     # Start next rollout
                     if (next_task := strategy.next_task()) is not None:
@@ -140,26 +141,27 @@ async def main(cluster_host: str, model_host: str, model_name: str, strategy_str
 
 def parse_strategy(strategy: str) -> Strategy:
     def _get_ids(ids: str):
-        ids = set()
+        all_ids = set()
         for id_group in ids.split(","):
             if "-" in id_group:
-                ids.update(range(int(id_group[0]), int(id_group[1])+1))
+                start, stop = id_group.split("-")
+                all_ids.update(range(int(start), int(stop)+1))
             else:
-                ids.add(int(id_group))
-        return ids
+                all_ids.add(int(id_group))
+        return all_ids
 
     match strategy:
         case s if (m := re.match(r"fixed\((?P<ids>\S+)\)", s)):
             ids = _get_ids(m.group("ids"))
             return FixedStrategy(tasks=[
-                SimpleDataEntryTask(row=[id])
+                SimpleDataEntryTask(rows=[id])
                 for id in ids
             ])
         case s if (m := re.match(r"nsuccess\((?P<ids>\S+);(?P<min_successful>\d+);(?P<max_attempts>\d+)\)", s)):
             ids = _get_ids(m.group("ids"))
             return NSuccessfulStrategy(
                 tasks=[
-                    SimpleDataEntryTask(row=[id])
+                    SimpleDataEntryTask(rows=[id])
                     for id in ids
                 ], 
                 min_successful=int(m.group("min_successful")), 
