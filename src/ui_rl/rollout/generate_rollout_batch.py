@@ -5,15 +5,17 @@ import httpx
 from pathlib import Path
 from datetime import datetime
 from simple_data_entry import SimpleDataEntryTask
-from cua import run_cua_rollout, load_kube_config
-from strategy import Strategy, FixedStrategy, NSuccessfulStrategy
-from uitars import UITARSRollout
+from .cua import run_cua_rollout
+from .strategy import Strategy, FixedStrategy, NSuccessfulStrategy
+from .uitars import UITARSRollout
+from .runtime import CUASessionRuntime
+from .runtime.kubernetes import KubernetesSessionRuntime
 
 
 async def run_single_rollout(
     rollout_id: int,
     task: SimpleDataEntryTask,
-    cluster_host: str,
+    runtime: CUASessionRuntime,
     model_host: str,
     model_name: str,
     max_steps: int,
@@ -33,9 +35,8 @@ async def run_single_rollout(
     try:
         await run_cua_rollout(
             rollout=rollout,
-            cluster_host=cluster_host,
+            runtime=runtime,
             max_steps=max_steps,
-            httpx_client=httpx_client
         )
         logging.info(f"Rollout {rollout_id} completed")
         return rollout_id, rollout, None
@@ -49,9 +50,8 @@ async def run_single_rollout(
 
 async def main(cluster_host: str, model_host: str, model_name: str, strategy_str: str, max_parallel: int, max_steps: int):
     """
-    Run single-row Simple Data Entry rollouts until at least N successful rollouts are generated for each row
+    Run SimpleDataEntry rollouts until at least N successful rollouts are generated for each row
     """
-    load_kube_config()
 
     # Create log directory with timestamp
     repo_root = Path(__file__).parent.parent.parent
@@ -67,22 +67,30 @@ async def main(cluster_host: str, model_host: str, model_name: str, strategy_str
             logging.FileHandler(log_file, mode='a')
         ]
     )
+    # Disable verbose logging from httpx
     logging.getLogger("httpx").setLevel(logging.WARNING)
-
-    strategy = parse_strategy(strategy_str)
 
     logging.info(f"Starting generation of rollouts, using {max_parallel} parallel workers")
     logging.info(f"Logs will be saved to: {base_run_dir}")
 
-    # Create global httpx session
-    async with httpx.AsyncClient(timeout=30) as session:
-        # Create initial tasks
+    rollout_strategy = parse_strategy(strategy_str)
+
+    # Use a global httpx session
+    async with httpx.AsyncClient(timeout=30) as httpx_client:
+        # Create session runtime
+        runtime = KubernetesSessionRuntime(
+            manifest_fn=simple_data_entry_manifest_fn,
+            host=cluster_host,
+            httpx_client=httpx_client
+        )
+
+        # Create asyncio tasks for each rollout
         asyncio_tasks = set()
         for next_rollout_id in range(1, max_parallel+1):
-            if (next_task := strategy.next_task()) is not None:
+            if (next_task := rollout_strategy.next_task()) is not None:
                 asyncio_tasks.add(
                     asyncio.create_task(
-                        run_single_rollout(next_rollout_id, next_task, cluster_host, model_host, model_name, max_steps, session)
+                        run_single_rollout(next_rollout_id, next_task, runtime, model_host, model_name, max_steps, httpx_client)
                     )
                 )
             else:
@@ -99,7 +107,7 @@ async def main(cluster_host: str, model_host: str, model_name: str, strategy_str
                         rollout_row = rollout.task.rows[0]
                         # If success
                         if set(rollout.progress["submitted_row_indices"]) == set([rollout_row-2]):
-                            strategy.on_success(rollout.task)
+                            rollout_strategy.on_success(rollout.task)
                             rollout.save(base_run_dir / f"rollout_{rollout_id:04d}_success.json")
                             logging.info(f"Successful rollout for task {rollout.task}")
                         else:
@@ -107,14 +115,14 @@ async def main(cluster_host: str, model_host: str, model_name: str, strategy_str
                             rollout.save(base_run_dir / f"rollout_{rollout_id:04d}_fail.json")
                     else:
                         logging.warning(f"Rollout {rollout_id} was interrupted due to an unrecoverable error")
-                        strategy.on_error(rollout.task)
+                        rollout_strategy.on_error(rollout.task)
                     
                     # Start next rollout
-                    if (next_task := strategy.next_task()) is not None:
+                    if (next_task := rollout_strategy.next_task()) is not None:
                         next_rollout_id += 1
                         asyncio_tasks.add(
                             asyncio.create_task(
-                                run_single_rollout(next_rollout_id, next_task, cluster_host, model_host, model_name, max_steps, session)
+                                run_single_rollout(next_rollout_id, next_task, runtime, model_host, model_name, max_steps, httpx_client)
                             )
                         )
                     else:
@@ -169,13 +177,41 @@ def parse_strategy(strategy: str) -> Strategy:
             )
         case _:
             raise ValueError("Invalid strategy")
+
+
+def simple_data_entry_manifest_fn(pod_name, session_id):
+    return {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": pod_name,
+            "labels": {
+                "app": "simple-data-entry",
+                "session-id": session_id
+            }
+        },
+        "spec": {
+            "containers": [
+                {
+                    "name": "session-container",
+                    "image": "europe-north2-docker.pkg.dev/my-project-1726641910410/ui-verifiers/simple-data-entry:latest",
+                    "imagePullPolicy": "Always",
+                    "ports": [
+                        {"containerPort": 8000},
+                        {"containerPort": 5900}
+                    ]
+                }
+            ],
+            "restartPolicy": "Never"
+        }
+    }
             
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Generate batch rollouts of SimpleDataEntryTask")
-    parser.add_argument("--cluster-host", default="34.51.223.83:8000", help="Cluster host address")
-    parser.add_argument("--vllm-host", default="localhost:8000", help="Model host address")
+    parser = argparse.ArgumentParser(description="Generate batch rollouts of SimpleDataEntryTask on a Kubernetes cluster")
+    parser.add_argument("--cluster-host", required=True, help="Cluster host address")
+    parser.add_argument("--vllm-host", required=True, help="Model host address")
     parser.add_argument("--model-name", default="ByteDance-Seed/UI-TARS-1.5-7B", help="Model name in vLLM")
     parser.add_argument("--strategy", required=True)
     parser.add_argument("--max-parallel", type=int, default=1, help="Maximum number of parallel rollouts")
