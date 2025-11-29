@@ -1,5 +1,6 @@
 from .runtime import CUASessionRuntime
 from .cua import Action, ActionType
+from .uitars import UITARSRollout
 import logging
 
 
@@ -7,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_cua_rollout(
-    rollout,
+    rollout: UITARSRollout,
     runtime: CUASessionRuntime,
     max_steps: int = 10,
 ):

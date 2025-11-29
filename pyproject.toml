@@ -10,6 +10,7 @@ authors = [
 dependencies = [
     "accelerate>=1.11.0",
     "datasets>=4.3.0",
+    "docker>=7.1.0",
     "flash-attn>=2.8.3",
     "ipykernel>=7.1.0",
     "kubernetes>=34.1.0",
