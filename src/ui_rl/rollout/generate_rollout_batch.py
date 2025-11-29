@@ -4,8 +4,8 @@ import re
 import httpx
 from pathlib import Path
 from datetime import datetime
-from simple_data_entry import SimpleDataEntryTask
-from .cua import run_cua_rollout
+from .simple_data_entry import SimpleDataEntryTask
+from .agent import run_cua_rollout
 from .strategy import Strategy, FixedStrategy, NSuccessfulStrategy
 from .uitars import UITARSRollout
 from .runtime import CUASessionRuntime
@@ -54,7 +54,7 @@ async def main(cluster_host: str, model_host: str, model_name: str, strategy_str
     """
 
     # Create log directory with timestamp
-    repo_root = Path(__file__).parent.parent.parent
+    repo_root = Path(__file__).parent.parent.parent.parent
     base_run_dir = repo_root / "data" / "rollouts" / datetime.now().strftime("%Y%m%d_%H%M%S")
     base_run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -115,7 +115,7 @@ async def main(cluster_host: str, model_host: str, model_name: str, strategy_str
                             rollout.save(base_run_dir / f"rollout_{rollout_id:04d}_fail.json")
                     else:
                         logging.warning(f"Rollout {rollout_id} was interrupted due to an unrecoverable error")
-                        rollout_strategy.on_error(rollout.task)
+                        #strategy.on_error(rollout.task)
                     
                     # Start next rollout
                     if (next_task := rollout_strategy.next_task()) is not None:

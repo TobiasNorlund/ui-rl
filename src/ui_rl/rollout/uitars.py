@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from cua import Action, ActionType, State
+from .cua import Action, ActionType, State
 from io import BytesIO
 import base64
 import httpx
@@ -9,7 +9,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import List, Dict
-from simple_data_entry import SimpleDataEntryTask
+from .simple_data_entry import SimpleDataEntryTask
 
 
 UI_TARS_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.

@@ -69,7 +69,7 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Opti
 
     # Resolve default checkpoint directory (datetime-stamped) and ensure it exists
     if output_dir is None:
-        repo_root = Path(__file__).parent.parent
+        repo_root = Path(__file__).parent.parent.parent
         output_root = repo_root / "data" / "checkpoints" / datetime.now().strftime("%Y%m%d_%H%M%S")
     else:
         output_root = output_dir
