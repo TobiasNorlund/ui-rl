@@ -9,7 +9,7 @@ from .agent import run_cua_rollout
 from .strategy import Strategy, FixedStrategy, NSuccessfulStrategy
 from .uitars import UITARSRollout
 from .runtime import CUASessionRuntime
-from .runtime.kubernetes import KubernetesSessionRuntime
+from .runtime.docker import DockerSessionRuntime
 
 
 async def run_single_rollout(
@@ -48,7 +48,7 @@ async def run_single_rollout(
         return rollout_id, None, e
 
 
-async def main(cluster_host: str, model_host: str, model_name: str, strategy_str: str, max_parallel: int, max_steps: int):
+async def main(model_host: str, model_name: str, strategy_str: str, max_parallel: int, max_steps: int):
     """
     Run SimpleDataEntry rollouts until at least N successful rollouts are generated for each row
     """
@@ -78,9 +78,13 @@ async def main(cluster_host: str, model_host: str, model_name: str, strategy_str
     # Use a global httpx session
     async with httpx.AsyncClient(timeout=30) as httpx_client:
         # Create session runtime
-        runtime = KubernetesSessionRuntime(
-            manifest_fn=simple_data_entry_manifest_fn,
-            host=cluster_host,
+        # runtime = KubernetesSessionRuntime(
+        #     manifest_fn=simple_data_entry_manifest_fn,
+        #     host=cluster_host,
+        #     httpx_client=httpx_client
+        # )
+        runtime = DockerSessionRuntime(
+            image="ui-verifiers/simple-data-entry:latest",
             httpx_client=httpx_client
         )
 
@@ -210,7 +214,7 @@ def simple_data_entry_manifest_fn(pod_name, session_id):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Generate batch rollouts of SimpleDataEntryTask on a Kubernetes cluster")
-    parser.add_argument("--cluster-host", required=True, help="Cluster host address")
+    #parser.add_argument("--cluster-host", required=True, help="Cluster host address")
     parser.add_argument("--vllm-host", required=True, help="Model host address")
     parser.add_argument("--model-name", default="ByteDance-Seed/UI-TARS-1.5-7B", help="Model name in vLLM")
     parser.add_argument("--strategy", required=True)
@@ -219,7 +223,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     try:
-        asyncio.run(main(args.cluster_host, args.vllm_host, args.model_name, args.strategy, args.max_parallel, args.max_steps))
+        asyncio.run(main(args.vllm_host, args.model_name, args.strategy, args.max_parallel, args.max_steps))
     except KeyboardInterrupt:
         logging.info("Script interrupted by user (Ctrl+C)")
         exit(0)
