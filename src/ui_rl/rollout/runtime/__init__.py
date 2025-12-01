@@ -5,11 +5,11 @@ from ..cua import Action, State
 class CUASessionRuntime(ABC):
 
     @abstractmethod
-    async def create_session(self) -> str:
+    def create_session(self, *args, **kwargs) -> str:
         pass
 
     @abstractmethod
-    async def teardown_session(self, session_id: str):
+    def teardown_session(self, session_id: str):
         pass
 
     @abstractmethod

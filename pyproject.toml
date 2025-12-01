@@ -28,5 +28,11 @@ dependencies = [
 requires = ["uv_build>=0.9.13,<0.10.0"]
 build-backend = "uv_build"
 
-[project.optional-dependencies]
-dev = ["pytest"]
+[dependency-groups]
+dev = [
+    "mypy>=1.19.0",
+    "pytest",
+]
+
+[tool.mypy]
+files = ["src/ui_rl"]

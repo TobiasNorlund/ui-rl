@@ -9,7 +9,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import List, Dict
-from .simple_data_entry import SimpleDataEntryTask
+from .task import TaskSpec
 
 
 UI_TARS_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
@@ -44,7 +44,7 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 class UITARSRollout:
     def __init__(
         self, 
-        task: SimpleDataEntryTask, 
+        task_instruction: TaskSpec, 
         model_host: str, 
         model_name: str,
         httpx_client: httpx.AsyncClient, 
@@ -55,12 +55,12 @@ class UITARSRollout:
         self._messages = [{
             "role": "user", "content": [{
                 "type": "text",
-                "text": UI_TARS_PROMPT.format(user_instruction=task.get_prompt()),
+                "text": UI_TARS_PROMPT.format(user_instruction=task_instruction.get_task_instruction()),
              }]
         }]
         self._completions: List[Completion] = []
-        self._task = task
-        self._progress = None
+        self._task_instruction = task_instruction
+        self._progress: dict | None = None
         self._model_host = model_host
         self._model_name = model_name
         self._client = httpx_client
@@ -69,15 +69,15 @@ class UITARSRollout:
         self._temperature = temperature
 
     @property
-    def task(self):
-        return self._task
+    def task_instruction(self) -> TaskSpec:
+        return self._task_instruction
 
     @property
-    def progress(self):
+    def progress(self) -> dict | None:
         return self._progress
 
     @progress.setter
-    def progress(self, progress: Dict):
+    def progress(self, progress: dict):
         self._progress = progress
 
     async def predict_next_action(self, new_state: State) -> Action | None:
@@ -161,7 +161,7 @@ class UITARSRollout:
 
     def save(self, filepath: str | Path):
         rollout_json = {
-            "task": self._task.get_state(),
+            "task": self._task_instruction.as_dict(),
             "messages": self._messages,
             "completions": [
                 {
@@ -180,8 +180,8 @@ class UITARSRollout:
 
 @dataclass
 class Completion:
-    context: List[int]
-    completion_message: int
+    context: List[Dict]
+    completion_message: Dict
     logprobs: Dict
 
 
@@ -288,7 +288,7 @@ async def parse_action(action_str: str) -> Action | None:
         
     elif action_str.startswith("wait()"):
         await asyncio.sleep(1)
-
+        return Action(action_type=ActionType.Screenshot)
     else:
         return None
 

@@ -8,8 +8,8 @@ import io
 import uuid
 import asyncio
 import httpx
-import docker
-from docker.models.containers import Container
+import docker  # type: ignore
+from docker.models.containers import Container  # type: ignore
 from . import CUASessionRuntime
 from ..cua import State, Action
 
@@ -25,7 +25,6 @@ class DockerSessionRuntime(CUASessionRuntime):
 
     def __init__(
         self,
-        image: str,
         port: int = 8000,
         session_timeout: int = 30,  # Timeout in seconds for session to come online
         httpx_client: Optional[httpx.AsyncClient] = None,
@@ -34,43 +33,40 @@ class DockerSessionRuntime(CUASessionRuntime):
     ):
         """
         Args:
-            image: Docker image to run for each session
-            port: Port number where the container's HTTP server is running
+            port: Port used for communicating with the session server
             session_timeout: Timeout in seconds for session to come online
             httpx_client: Optional httpx client for making HTTP requests
             docker_client: Optional Docker client, defaults to docker.from_env()
             **container_kwargs: Additional kwargs to pass to docker.containers.run()
         """
-        self._docker_client = docker_client or docker.from_env()
-        self._image = image
         self._port = port
+        self._docker_client = docker_client or docker.from_env()
         self._session_timeout = session_timeout
         self._httpx_client = httpx_client or httpx.AsyncClient(timeout=30.0)
         self._container_kwargs = container_kwargs
         self._containers: dict[str, Container] = {}
 
-    async def create_session(self) -> str:
+    def create_session(self, **kwargs) -> str:
         session_id = str(uuid.uuid4())[:8]
         container_name = f"session-{session_id}"
 
         # Run container in detached mode with --rm (auto-remove on stop)
-        container = await asyncio.to_thread(
-            self._docker_client.containers.run,
-            self._image,
+        container = self._docker_client.containers.run(
             name=container_name,
             detach=True,
             remove=True,
+            **kwargs,
             **self._container_kwargs
         )
 
         self._containers[session_id] = container
         return session_id
 
-    async def teardown_session(self, session_id: str):
+    def teardown_session(self, session_id: str):
         container = self._containers.get(session_id)
         if container:
             try:
-                await asyncio.to_thread(container.stop, timeout=10)
+                container.stop()
             except Exception as e:
                 logger.warning(f"({session_id}) Error stopping container: {e}")
             finally:
@@ -114,7 +110,6 @@ class DockerSessionRuntime(CUASessionRuntime):
             raise RuntimeError(f"Session {session_id} not found")
 
         # Get the container's internal IP
-        #await asyncio.to_thread(container.reload)
         container_ip = self._get_container_ip(container)
 
         qs = "&".join(f"{k}={quote(str(v))}" for k, v in asdict(action).items() if v is not None)
@@ -155,6 +150,8 @@ class DockerSessionRuntime(CUASessionRuntime):
                 else:
                     logger.error(f"({session_id}) Act failed after 3 attempts: {str(e)}")
                     raise
+        else:
+            raise RuntimeError() # Won't reach here
 
     async def get_session_progress(self, session_id: str) -> dict:
         container = self._containers.get(session_id)
@@ -198,6 +195,8 @@ class DockerSessionRuntime(CUASessionRuntime):
                 else:
                     logger.error(f"({session_id}) Failed getting progress after 3 attempts: {str(e)}")
                     raise
+        else:
+            raise RuntimeError()  # won't reach here
 
     def _get_container_ip(self, container: Container) -> str:
         """

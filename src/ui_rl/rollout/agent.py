@@ -1,3 +1,4 @@
+from .task import TaskSpec
 from .runtime import CUASessionRuntime
 from .cua import Action, ActionType
 from .uitars import UITARSRollout
@@ -8,26 +9,27 @@ logger = logging.getLogger(__name__)
 
 
 async def run_cua_rollout(
+    task_spec: TaskSpec,
     rollout: UITARSRollout,
     runtime: CUASessionRuntime,
     max_steps: int = 10,
 ):
     """
-    Launches a session pod, awaits it ready, and executes a Computer Use agent in it.
+    Launches a session, awaits it ready, and executes a Computer Use agent in it.
     """
-    session_id = await runtime.create_session()
+    session_id = task_spec.create_session(runtime)
     try:
         logger.info(f"({session_id}) Starting...")
         await runtime.session_ready(session_id)
         logger.info(f"({session_id}) Ready")
 
         # Start with getting the init state (e.g. take screenshot)
-        action = Action(ActionType.Screenshot)
+        action  = Action(ActionType.Screenshot)
         state = await runtime.session_act(session_id, action)
 
         for step_num in range(max_steps):
             logger.info(f"({session_id}) Predicting action {step_num+1}")
-            action = await rollout.predict_next_action(state)
+            action = await rollout.predict_next_action(state)  # type: ignore
             if action is None:
                 break
                 

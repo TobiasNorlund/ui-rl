@@ -1,6 +1,5 @@
 from datetime import datetime
-from accelerate.tracking import LoggerType
-from kubernetes import client, config
+from kubernetes import client, config  # type: ignore
 from typing import Callable
 from dataclasses import asdict
 from urllib.parse import quote
@@ -27,24 +26,22 @@ class KubernetesSessionRuntime(CUASessionRuntime):
 
     def __init__(
         self, 
-        manifest_fn: Callable, 
-        host: str, 
+        host: str,
+        httpx_client: httpx.AsyncClient,
         session_timeout: int = 60 * 3,  # Timeout in seconds for session to come online
-        httpx_client: httpx.AsyncClient = None
     ):
         config.load_kube_config()
         self._core_v1 = client.CoreV1Api()
-        self._manifest_fn = manifest_fn
         self._host = host
         self._session_timeout = session_timeout
         self._httpx_client = httpx_client
 
-    async def create_session(self) -> str:
+    def create_session(self, manifest_fn: Callable) -> str:
         session_id = str(uuid.uuid4())[:8]
         pod_name = f"session-{session_id}"
         self._core_v1.create_namespaced_pod(
             namespace="default",
-            body=self._manifest_fn(pod_name, session_id)
+            body=manifest_fn(pod_name, session_id)
         )
         return session_id
 
@@ -84,7 +81,7 @@ class KubernetesSessionRuntime(CUASessionRuntime):
                 # Check for 5xx server errors
                 if resp.status_code >= 500:
                     if attempt < 2:  # Not the last attempt
-                        LoggerType.warning(f"({session_id}) Error acting: HTTP {resp.status_code} {str(resp.content)} (attempt {attempt + 1}/3)")
+                        logger.warning(f"({session_id}) Error acting: HTTP {resp.status_code} {str(resp.content)} (attempt {attempt + 1}/3)")
                         continue
                     else:
                         resp.raise_for_status()  # Raise exception on last attempt
@@ -112,6 +109,8 @@ class KubernetesSessionRuntime(CUASessionRuntime):
                 else:
                     logger.error(f"({session_id}) Act failed after 3 attempts: {str(e)}")
                     raise
+        else:
+            raise RuntimeError()  # won't reach here
 
     async def get_session_progress(self, session_id: str) -> dict:
         url = f"http://{self._host}/proxy/{session_id}/progress"
@@ -147,3 +146,5 @@ class KubernetesSessionRuntime(CUASessionRuntime):
                 else:
                     logger.error(f"({session_id}) Failed getting progress after 3 attempts: {str(e)}")
                     raise
+        else:
+            raise RuntimeError()  # won't reach here
