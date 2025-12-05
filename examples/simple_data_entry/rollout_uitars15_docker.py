@@ -118,8 +118,14 @@ def parse_strategy(strategy: str) -> RolloutStrategy:
 
 if __name__ == "__main__":
     import argparse
+    
+    class WideHelpFormatter(argparse.RawDescriptionHelpFormatter):
+        def __init__(self, prog):
+            super().__init__(prog, width=120, max_help_position=50)
+    
     parser = argparse.ArgumentParser(
-        description="Generate a batch of SimpleDataEntry rollouts using Docker runtime and a vLLM model host"
+        description="Generate a batch of SimpleDataEntry rollouts using Docker runtime and a vLLM model host",
+        formatter_class=WideHelpFormatter
     )
     parser.add_argument("--vllm-host", required=True, help="vLLM host")
     parser.add_argument("--strategy", required=True, help="Rollout strategy to use")
