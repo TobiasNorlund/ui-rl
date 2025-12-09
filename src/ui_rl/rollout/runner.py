@@ -86,7 +86,6 @@ class NSuccessfulStrategy(RolloutStrategy):
             self._success_counter[result.task_spec] += 1
 
 
-
 async def run_rollout(
     rollout_id: int,
     task_spec: TaskSpec,

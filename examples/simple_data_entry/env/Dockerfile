@@ -27,7 +27,8 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     python-xlib>=0.33 \
     screeninfo>=0.8.1 \
     uvicorn>=0.37.0 \
-    pyautogui>=0.9.54
+    pyautogui>=0.9.54 \
+    pynput>=1.8.1
 
 EXPOSE 5900 8000
 

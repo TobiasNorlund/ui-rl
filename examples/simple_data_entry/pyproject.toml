@@ -1,0 +1,15 @@
+[project]
+name = "simple-data-entry"
+version = "0.0.1"
+requires-python = ">=3.12"
+
+dependencies = [
+    "ui-rl",
+    "wandb>=0.22.3",
+    "matplotlib>=3.10.7",
+    "ipykernel>=7.1.0",
+    "streamlit>=1.52.1",
+]
+
+[tool.uv.sources]
+ui-rl = { workspace = true }

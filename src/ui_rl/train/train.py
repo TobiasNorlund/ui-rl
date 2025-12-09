@@ -15,10 +15,14 @@ import os
 from datetime import datetime
 
 
-def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Optional[str] = None, eval_checkpoint_steps: int = 100, lora_adapter_path: Optional[str] = None):
-    # Monkey patch transformers fixed_cross_entropy to allow passing "reduction"
-    transformers.loss.loss_utils.fixed_cross_entropy = fixed_cross_entropy
-
+def main(
+    rollouts: List[str], 
+    grad_accumulation_steps: int = 1, 
+    output_dir: Optional[str] = None, 
+    eval_checkpoint_steps: int = 100, 
+    lora_adapter_path: Optional[str] = None,
+    model_name: str = "ByteDance-Seed/UI-TARS-1.5-7B"
+):
     ds = load_dataset(rollouts)
     train_size = int(0.95 * len(ds))
     test_size = len(ds) - train_size
@@ -35,7 +39,7 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Opti
         # Continue training from an existing LoRA adapter
         print(f"Loading LoRA adapter from: {lora_adapter_path}")
         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            "ByteDance-Seed/UI-TARS-1.5-7B",
+            model_name,
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
         )
@@ -43,7 +47,7 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Opti
     else:
         # Start fresh with new LoRA adapter
         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            "ByteDance-Seed/UI-TARS-1.5-7B",
+            model_name,
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
         )
@@ -55,7 +59,7 @@ def main(rollouts: List[str], grad_accumulation_steps: int = 1, output_dir: Opti
             bias="none",
             task_type="CAUSAL_LM"
         )
-        model = get_peft_model(model, lora_config)    
+        model = get_peft_model(model, lora_config)
 
     model.config.use_cache = False
     model.gradient_checkpointing_enable()
@@ -156,7 +160,7 @@ def load_dataset(rollout_paths: List[str]):
 
 class RolloutDataset(Dataset):
     def __init__(self, sequences):
-        self.processor = AutoProcessor.from_pretrained("ByteDance-Seed/UI-TARS-1.5-7B")
+        self.processor = AutoProcessor.from_pretrained(model_name)
         self.sequences = sequences  # list of (messages, completions)
 
     def __len__(self):
@@ -301,10 +305,11 @@ def fixed_cross_entropy(
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rollouts", nargs="+", default=["runs/20251103_181518/rollout_000.json"])
+    parser.add_argument("--rollouts", nargs="+", required=True)
     parser.add_argument("--grad-accumulation-steps", type=int, default=1)
     parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--eval-checkpoint-steps", type=int, default=100)
     parser.add_argument("--lora-adapter-path", type=str, default=None, help="Path to existing LoRA adapter to continue training from")
+    parser.add_argument("--model-name", type=str, default="ByteDance-Seed/UI-TARS-1.5-7B")
     args = parser.parse_args()
     main(**vars(args))

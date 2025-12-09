@@ -23,7 +23,7 @@ async def act(type: ActionType, **kwargs):
     """Execute an action based on the action type"""
     match type:
         case ActionType.Screenshot:
-            return await screenshot()
+            return screenshot()
         case ActionType.MouseMove:
             await mouse_move(x=kwargs["x"], y=kwargs["y"])
         case ActionType.LeftClick:
@@ -42,7 +42,7 @@ async def act(type: ActionType, **kwargs):
             await scroll(direction=kwargs["direction"], x=kwargs.get("x"), y=kwargs.get("y"))
 
 
-async def screenshot():
+def screenshot():
     """Take a screenshot of the current screen"""
     disp = display.Display(os.environ["DISPLAY"])
     root = disp.screen().root

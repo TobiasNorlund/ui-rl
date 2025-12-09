@@ -69,10 +69,6 @@ class UITARSRollout:
         self._temperature = temperature
 
     @property
-    def task_instruction(self) -> TaskSpec:
-        return self._task_instruction
-
-    @property
     def progress(self) -> dict | None:
         return self._progress
 
