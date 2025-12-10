@@ -32,6 +32,7 @@ def main(
         rollout_paths = [path.strip() for path in f]
 
     train_rollouts, test_rollouts = train_test_split(rollout_paths, test_num_or_ratio=num_test_rollouts)
+    print(f"Using {len(train_rollouts)} training and {len(test_rollouts)} test rollouts")
     
     processor = AutoProcessor.from_pretrained(model_name)
     train_ds = UITARS15_SFTDataset(processor, train_rollouts)
@@ -99,8 +100,8 @@ def main(
             "lr": lr,
             "batch_size": 1,
             "grad_accum": grad_accumulation_steps,
-            "train_size": train_size,
-            "test_size": test_size,
+            "train_size": len(train_rollouts),
+            "test_size": len(test_rollouts),
             "output_dir": output_root,
             "eval_checkpoint_steps": eval_checkpoint_steps,
         })

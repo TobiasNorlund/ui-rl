@@ -1,7 +1,7 @@
 # UI Reinforcement Learning
 
-`ui-rl` implements Reinforcement Fine-tuning for Computer Use models. 
-Allows training on verifiable UI tasks from [ui-verifiers](https://github.com/TobiasNorlund/ui-verifiers) to improve model reliability on targeted domains and tasks.
+`ui-rl` is a library for fine-tuning of Computer Use agent models.
+It allows training on verifiable UI tasks to improve model reliability on targeted domains and tasks.
 
 ## How to run
 

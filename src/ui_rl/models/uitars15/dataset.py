@@ -92,9 +92,11 @@ def _load_rollout(rollout_path: str):
                 del block["image_url"]
     # Preprocess completions
     for completion in rollout["completions"]:
-        for logprobs in completion["logprobs"]:
-            del logprobs["bytes"]
-            del logprobs["top_logprobs"]
+        if "logprobs" in completion:
+            del completion["logprobs"]
+        #for logprobs in completion["logprobs"]:
+        #    del logprobs["bytes"]
+        #    del logprobs["top_logprobs"]
     return rollout
 
 
@@ -107,8 +109,8 @@ def _get_rollout_sequences(rollout):
         )
         seqs[longest].append({
             "message_idx": longest.index(completion["completion"]),
-            "logprobs": [l["logprob"] for l in completion["logprobs"]],
-            "tokens": [l["token"] for l in completion["logprobs"]],
+            #"logprobs": [l["logprob"] for l in completion["logprobs"]],
+            #"tokens": [l["token"] for l in completion["logprobs"]],
         })
 
     output = []
