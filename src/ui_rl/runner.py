@@ -6,7 +6,7 @@ import httpx
 from dataclasses import dataclass
 from .task import TaskSpec
 from .agent import run_cua_rollout
-from .uitars import UITARSRollout
+from .models.uitars15 import UITARS15_Rollout
 from .runtime import CUASessionRuntime
 
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class RolloutResult:
     rollout_id: int 
     task_spec: TaskSpec
-    rollout: UITARSRollout
+    rollout: UITARS15_Rollout
     error: Exception | None
 
 
@@ -99,7 +99,7 @@ async def run_rollout(
     Run a single rollout and return the result
     """
     logger.info(f"Starting UITARS rollout for task: {task_spec}")
-    rollout = UITARSRollout(
+    rollout = UITARS15_Rollout(
         task_instruction=task_spec,
         model_host=model_host,
         model_name=model_name,

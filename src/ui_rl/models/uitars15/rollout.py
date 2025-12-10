@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from .cua import Action, ActionType, State
 from io import BytesIO
 import base64
 import httpx
@@ -9,7 +8,9 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import List, Dict
-from .task import TaskSpec
+
+from ui_rl.cua import Action, ActionType, State
+from ui_rl.task import TaskSpec
 
 
 UI_TARS_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
@@ -41,7 +42,7 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 """
 
 
-class UITARSRollout:
+class UITARS15_Rollout:
     def __init__(
         self, 
         task_instruction: TaskSpec, 

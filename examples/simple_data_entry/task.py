@@ -1,7 +1,7 @@
 from typing import List
-from ui_rl.rollout.task import TaskSpec
-from ui_rl.rollout.runtime import CUASessionRuntime
-from ui_rl.rollout.runtime.docker import DockerSessionRuntime
+from ui_rl.task import TaskSpec
+from ui_rl.runtime import CUASessionRuntime
+from ui_rl.runtime.docker import DockerSessionRuntime
 
 
 class SimpleDataEntryTaskSpec(TaskSpec):

@@ -6,8 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from functools import partial
 
-from ui_rl.rollout import RolloutResult, RolloutStrategy, FixedStrategy, NSuccessfulStrategy, run_rollouts
-from ui_rl.rollout.runtime.docker import DockerSessionRuntime
+from ui_rl import RolloutResult, RolloutStrategy, FixedStrategy, NSuccessfulStrategy, run_rollouts
+from ui_rl.runtime.docker import DockerSessionRuntime
 
 from task import SimpleDataEntryTaskSpec
 

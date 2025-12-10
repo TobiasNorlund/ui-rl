@@ -1,8 +1,9 @@
+import logging
+
 from .task import TaskSpec
 from .runtime import CUASessionRuntime
 from .cua import Action, ActionType
-from .uitars import UITARSRollout
-import logging
+from .models.uitars15 import UITARS15_Rollout
 
 
 logger = logging.getLogger(__name__)
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 async def run_cua_rollout(
     task_spec: TaskSpec,
-    rollout: UITARSRollout,
+    rollout: UITARS15_Rollout,
     runtime: CUASessionRuntime,
     max_steps: int = 10,
 ):
