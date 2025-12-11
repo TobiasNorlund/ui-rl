@@ -1,16 +1,22 @@
-import json
-from pathlib import Path
 from io import BytesIO
-import base64
-import httpx
+from pathlib import Path
+import h5py
+import pickle
+from PIL import Image
 import asyncio
 import logging
+import uuid
 import re
-from dataclasses import dataclass
-from typing import List, Dict
+from transformers import AutoProcessor
+from typing import List, NamedTuple
+from vllm import AsyncLLMEngine, SamplingParams
+from vllm.lora.request import LoRARequest
 
 from ui_rl.cua import Action, ActionType, State
 from ui_rl.task import TaskSpec
+
+
+logger = logging.getLogger(__name__)
 
 
 UI_TARS_PROMPT = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
@@ -43,31 +49,31 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 
 
 class UITARS15_Rollout:
+
+    _processor = AutoProcessor.from_pretrained("ByteDance-Seed/UI-TARS-1.5-7B")
+
     def __init__(
         self, 
-        task_instruction: TaskSpec, 
-        model_host: str, 
-        model_name: str,
-        httpx_client: httpx.AsyncClient, 
+        task_spec: TaskSpec, 
+        async_engine: AsyncLLMEngine,
+        sampling_params: SamplingParams,
+        lora_request: LoRARequest | None = None,
         max_images_in_context: int = 10,
-        max_completion_tokens: int = 200,
-        temperature: float = 1.0
     ):
-        self._messages = [{
-            "role": "user", "content": [{
-                "type": "text",
-                "text": UI_TARS_PROMPT.format(user_instruction=task_instruction.get_task_instruction()),
-             }]
-        }]
-        self._completions: List[Completion] = []
-        self._task_instruction = task_instruction
+        self._task_spec = task_spec
         self._progress: dict | None = None
-        self._model_host = model_host
-        self._model_name = model_name
-        self._client = httpx_client
+        self._engine = async_engine
+        self._lora_request = lora_request
+        self._sampling_params = sampling_params
         self._max_images_in_context = max_images_in_context
-        self._max_completion_tokens = max_completion_tokens
-        self._temperature = temperature
+
+        self._messages = [
+            {"role": "user", "content": [
+                {"type": "text", "text": UI_TARS_PROMPT.format(user_instruction=self._task_spec.get_task_instruction())}
+            ]}
+        ]
+        self._completions: List[Completion] = []
+        self._images = []
 
     @property
     def progress(self) -> dict | None:
@@ -78,108 +84,99 @@ class UITARS15_Rollout:
         self._progress = progress
 
     async def predict_next_action(self, new_state: State) -> Action | None:
-        # Add new state to messages list
+        # Append a new user message for the new screenshot
+        self._messages.append(
+            {"role": "user", "content": [
+                {"type": "image"}
+            ]}
+        )
+        self._images.append(new_state.screenshot)
+
+        # Get the prompt messages for the next completion
+        prompt_messages, images = self._get_prompt_messages_and_images()
+
+        # Tokenize
+        prompt_token_ids = self._processor.apply_chat_template(
+            prompt_messages, 
+            tokenize=True, 
+            add_generation_prompt=True
+        )[0]
+
+        res_gen = self._engine.generate(
+            prompt={"prompt_token_ids": prompt_token_ids, "multi_modal_data": {"image": images}},
+            sampling_params=self._sampling_params,
+            request_id=str(uuid.uuid4()),
+            lora_request=self._lora_request
+        )
+
+        # Await generation...
+        async for request_output in res_gen:
+            # Just pass until the final request_output
+            pass
+
+        assert len(request_output.outputs) == 1, "Should only get one final output from vLLM"
+
+        if request_output.outputs[0].finish_reason != "stop":
+            logger.warning(f"Generation did not finish normally: {request_output.outputs[0].finish_reason}")
+
+        generated_text = request_output.outputs[0].text
+        generated_token_ids = request_output.outputs[0].token_ids
+
+        self._completions.append(Completion(
+            prompt_token_ids=prompt_token_ids,
+            generated_text=generated_text,
+            generated_token_ids=generated_token_ids,
+            images=images
+        ))
+
         self._messages.append({
-            "role": "user", "content": [{
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{encode_image_to_base64(new_state.screenshot)}"}
-            }]
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": request_output.outputs[0].text}
+            ]
         })
 
-        # Get messages to predict next action
-        context = self._get_completion_context()
-        response = await self._request_completion(
-            model=self._model_name,
-            messages=context,
-            temperature=self._temperature,
-            max_tokens=self._max_completion_tokens,
-            skip_special_tokens=False,
-            logprobs=1,
-        )
-
-        if "choices" not in response or len(response["choices"]) == 0:
-            raise ValueError("No output from model")
-
-        completion_message = response["choices"][0]["message"]
-        logprobs = response["choices"][0]["logprobs"]["content"]
-
-        completion = Completion(
-            context=context,
-            completion_message=completion_message,
-            logprobs=logprobs
-        )
-
-        self._messages.append(completion_message)
-        self._completions.append(completion)
-
         # Handle response message
-        assert isinstance(completion_message["content"], str), "completion_message['content'] must be a string"
-        thought, reflection, action_str = parse_response_string(completion_message["content"])
+        thought, reflection, action_str = parse_response_string(generated_text)
         if action_str in ("finished()", "call_user()"):
             return None
 
         return await parse_action(action_str)
 
-    def _get_completion_context(self):
+    def _get_prompt_messages_and_images(self):
         messages = []
         messages.append(self._messages[0]) # Add prompt message
 
         # Add as much as possible of the message context, but cap at _max_images_in_context
-        image_messages = [i for i, m in enumerate(self._messages) if "content" in m and isinstance(m["content"], list) and any(c.get("type") == "image_url" for c in m["content"])]
+        image_messages = [i for i, m in enumerate(self._messages) if "content" in m and isinstance(m["content"], list) and any(c.get("type") == "image" for c in m["content"])]
         if len(image_messages) <= self._max_images_in_context:
             # Include all context
             messages += self._messages[1:]
+            images = self._images
         else:
             # Cap to include at most _max_images_in_context
             cap_idx = image_messages[-self._max_images_in_context]
             messages += self._messages[cap_idx:]
-        return messages
-
-    async def _request_completion(self, **kwargs):
-        for attempt in range(3):
-            try:
-                resp = await self._client.post(
-                    url=f"http://{self._model_host}/v1/chat/completions",
-                    headers={"Content-Type": "application/json"},
-                    json=kwargs,
-                )
-                resp.raise_for_status()
-                return resp.json()
-            except asyncio.CancelledError:
-                raise
-            except httpx.HTTPError as e:
-                if attempt < 2:  # Not the last attempt
-                    logging.warning(f"Error predicting next action: {str(e)} (attempt {attempt + 1}/3)")
-                    await asyncio.sleep(0.1)
-                    continue
-                else:
-                    logging.error(f"Request failed after 3 attempts: {str(e)}")
-                    raise
+            images = self._images[-10:]
+        return messages, images
 
     def save(self, filepath: str | Path):
-        rollout_json = {
-            "task": self._task_instruction.as_dict(),
-            "messages": self._messages,
-            "completions": [
-                {
-                    "context": [self._messages.index(m) for m in completion.context],
-                    "completion": self._messages.index(completion.completion_message),
-                    "logprobs": completion.logprobs
-                }
-                for completion in self._completions
-            ],
-            "progress": self._progress
-        }
-        with open(filepath, 'w') as f:
-            json.dump(rollout_json, f)
+        with h5py.File(filepath, 'w') as f:
+            for i, c in enumerate(self._completions):
+                f[f"completions/{i}/prompt_token_ids"] = c.prompt_token_ids
+                f[f"completions/{i}/generated_text"] = c.generated_text
+                f[f"completions/{i}/generated_token_ids"] = c.generated_token_ids
+                f[f"completions/{i}/images"] = [self._images.index(img) for img in c.images]
+            f["images"] = [png_encode(img) for img in self._images]
+            f["task_spec"] = pickle.dumps(self._task_spec.as_dict())
+            f["progress"] = pickle.dumps(self._progress)
 
 
-
-@dataclass
-class Completion:
-    context: List[Dict]
-    completion_message: Dict
-    logprobs: Dict
+class Completion(NamedTuple):
+    prompt_token_ids: list[int]
+    generated_text: str
+    generated_token_ids: list[int]
+    images: list[Image]
 
 
 def parse_response_string(response_string: str):
@@ -289,9 +286,9 @@ async def parse_action(action_str: str) -> Action | None:
     else:
         return None
 
-    
-def encode_image_to_base64(image):
+
+def png_encode(image: Image) -> bytes:
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     buffer.seek(0)
-    return base64.b64encode(buffer.read()).decode("utf-8")
+    return buffer.read()

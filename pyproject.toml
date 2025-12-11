@@ -15,9 +15,9 @@ dependencies = [
     "litellm>=1.80.8",
     "peft>=0.17.1",
     "pillow>=11.3.0",
-    "torch<2.9",
+    "torch>=2.9",
     "tqdm>=4.67.1",
-    "vllm>=0.11.0",
+    "vllm>=0.12.0",
 ]
 
 [tool.uv.workspace]

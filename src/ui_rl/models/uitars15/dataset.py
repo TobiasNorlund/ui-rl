@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 Span = namedtuple("Span", ["start", "end", "role_id"])
 Rollout = namedtuple("Rollout", ["task", "progress"])
 
+
 class UITARS15_SFTDataset(Dataset):
     """
     Dataset for SFT training UITARS 1.5 on trajectory/rollout data

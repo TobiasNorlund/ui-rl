@@ -2,23 +2,27 @@ import asyncio
 import re
 import httpx
 import logging
+import vllm
 from datetime import datetime
 from pathlib import Path
 from functools import partial
 
+from vllm.lora.request import LoRARequest
+
 from ui_rl import RolloutResult, RolloutStrategy, FixedStrategy, NSuccessfulStrategy, run_rollouts
+from ui_rl.models.uitars15.rollout import UITARS15_Rollout
 from ui_rl.runtime.docker import DockerSessionRuntime
 
 from task import SimpleDataEntryTaskSpec
+from ui_rl.task import TaskSpec
 
 
 async def main(
-    vllm_host: str, 
-    model_name: str, 
     strategy: RolloutStrategy, 
     max_parallel: int, 
     max_steps: int, 
-    output_dir: Path
+    output_dir: Path,
+    lora_adapter: str | None = None
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
     log_file = output_dir / "output.log"
@@ -38,18 +42,39 @@ async def main(
 
     # Use a global httpx session
     async with httpx.AsyncClient(timeout=30) as httpx_client:
+
         # Create docker session runtime 
         runtime = DockerSessionRuntime(httpx_client=httpx_client)
 
+        # Create vLLM async engine
+        engine_args = vllm.AsyncEngineArgs(
+            model="ByteDance-Seed/UI-TARS-1.5-7B",
+            limit_mm_per_prompt={"image": 10, "video": 0},
+            max_num_seqs=8,
+
+            enable_lora=True,
+            max_lora_rank=64,
+            lora_modules=[("lora_adapter", lora_adapter)] if lora_adapter else None
+        )
+        lora_request = LoRARequest("lora_adapter", 1, lora_adapter) if lora_adapter else None
+        engine = vllm.AsyncLLMEngine.from_engine_args(engine_args)
+
+        def new_rollout(task_spec: TaskSpec):
+            return UITARS15_Rollout(
+                task_spec=task_spec,
+                async_engine=engine,
+                sampling_params=vllm.SamplingParams(max_tokens=200, temperature=0.1),
+                max_images_in_context=10,
+                lora_request=lora_request
+            )
+
         # Run rollouts
         await run_rollouts(
-            vllm_host=vllm_host,
-            model_name=model_name,
             strategy=strategy,
+            new_rollout=new_rollout,
             runtime=runtime,
             max_parallel=max_parallel,
             max_steps=max_steps,
-            httpx_client=httpx_client,
             on_rollout_finish=partial(on_rollout_finish, output_dir=output_dir)
         )
 
@@ -60,9 +85,9 @@ def on_rollout_finish(result: RolloutResult, output_dir: Path):
     """
     if result.error is None:
         if is_rollout_correct(result):
-            result.rollout.save(output_dir / f"rollout_{result.rollout_id:04d}_success.json")
+            result.rollout.save(output_dir / f"rollout_{result.rollout_id:04d}_success.hdf5")
         else:
-            result.rollout.save(output_dir / f"rollout_{result.rollout_id:04d}_fail.json")
+            result.rollout.save(output_dir / f"rollout_{result.rollout_id:04d}_fail.hdf5")
 
 
 def is_rollout_correct(result: RolloutResult) -> bool:
@@ -127,11 +152,11 @@ if __name__ == "__main__":
         description="Generate a batch of SimpleDataEntry rollouts using Docker runtime and a vLLM model host",
         formatter_class=WideHelpFormatter
     )
-    parser.add_argument("--vllm-host", required=True, help="vLLM host")
     parser.add_argument("--strategy", required=True, help="Rollout strategy to use")
     parser.add_argument("--max-parallel", type=int, default=1, help="Maximum number of parallel rollouts")
     parser.add_argument("--max-steps", type=int, default=20, help="Maximum steps per rollout")
     parser.add_argument("--output-dir", help="Dir to save rollouts and logs")
+    parser.add_argument("--lora-adapter", help="LoRA checkpoint to use")
     args = parser.parse_args()
 
     if args.output_dir is None:
@@ -144,7 +169,6 @@ if __name__ == "__main__":
 
     try:
         asyncio.run(main(
-            vllm_host=args.vllm_host,
             model_name=args.model_name,
             strategy=rollout_strategy,
             max_parallel=args.max_parallel,

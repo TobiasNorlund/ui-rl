@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 from .runtime import CUASessionRuntime
 
@@ -19,5 +20,5 @@ class TaskSpec(ABC):
         """
         pass
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> Any:
         return vars(self)
