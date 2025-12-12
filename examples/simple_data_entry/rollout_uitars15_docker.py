@@ -80,6 +80,7 @@ class NCorrectRowsStrategy(NSuccessfulStrategy):
         """
         Override to mark rollout successful when the submitted rows match the expected
         """
+        self._inflight_counter[result.task_spec] -= 1
         if result.error is None and is_rollout_correct(result):
             self._success_counter[result.task_spec] += 1
 
@@ -102,7 +103,7 @@ def parse_strategy(strategy: str) -> RolloutStrategy:
                 SimpleDataEntryTaskSpec(rows=[id])
                 for id in ids
             ])
-        case s if (m := re.match(r"ncorrect\((?P<ids>\S+);(?P<min_successful>\d+);(?P<max_attempts>\d+)\)", s)):
+        case s if (m := re.match(r"ncorrect\((?P<ids>\S+);(?P<min_successful>\d+);(?P<max_inflight_per_task>\d+);(?P<max_attempts>\d+)\)", s)):
             ids = _get_ids(m.group("ids"))
             return NCorrectRowsStrategy(
                 tasks=[
@@ -110,6 +111,7 @@ def parse_strategy(strategy: str) -> RolloutStrategy:
                     for id in ids
                 ], 
                 min_successful=int(m.group("min_successful")), 
+                max_inflight_per_task=int(m.group("max_inflight_per_task")),
                 max_attempts=int(m.group("max_attempts"))
             )
         case _:

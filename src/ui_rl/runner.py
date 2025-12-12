@@ -54,12 +54,14 @@ class FixedStrategy(RolloutStrategy):
 class NSuccessfulStrategy(RolloutStrategy):
     """
     Generate rollouts until all tasks have at least `min_successful` succeeded rollouts.
-    `next_task()` returns the same task until `min_successful` rollouts have completed without error
+    `next_task()` returns the same task until `min_successful` rollouts have completed without error.
+    At most `min_successful` attempts per task can be in-flight at any given time.
     """
-    
-    def __init__(self, tasks: list[TaskSpec], min_successful: int, max_attempts: int = 100):
+
+    def __init__(self, tasks: list[TaskSpec], min_successful: int, max_inflight_per_task: int = 100, max_attempts: int = 100):
         self._tasks = tasks
         self._min_successful = min_successful
+        self._max_inflight_per_task = max_inflight_per_task
         self._max_attempts = max_attempts
         self._success_counter = {
             task: 0
@@ -69,19 +71,28 @@ class NSuccessfulStrategy(RolloutStrategy):
             task: 0
             for task in tasks
         }
+        self._inflight_counter = {
+            task: 0
+            for task in tasks
+        }
 
     def next_task(self):
         for task in self._tasks:
-            if self._success_counter[task] < self._min_successful and self._attempt_counter[task] < self._max_attempts:
+            if (self._success_counter[task] < self._min_successful
+                and self._attempt_counter[task] < self._max_attempts
+                and self._inflight_counter[task] < self._max_inflight_per_task):
                 self._attempt_counter[task] += 1
+                self._inflight_counter[task] += 1
                 return task
         else:
             return None
 
     def on_rollout_finish(self, result: RolloutResult):
         """
-        Treat rollout as successful if there was no error
+        Treat rollout as successful if there was no error.
+        Decrement the in-flight counter for the task.
         """
+        self._inflight_counter[result.task_spec] -= 1
         if result.error is None:
             self._success_counter[result.task_spec] += 1
 
