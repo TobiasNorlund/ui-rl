@@ -51,19 +51,23 @@ async def main(
             model="ByteDance-Seed/UI-TARS-1.5-7B",
             limit_mm_per_prompt={"image": 10, "video": 0},
             max_num_seqs=8,
-
             enable_lora=True,
-            max_lora_rank=64,
-            lora_modules=[("lora_adapter", lora_adapter)] if lora_adapter else None
+            max_lora_rank=64
         )
         lora_request = LoRARequest("lora_adapter", 1, lora_adapter) if lora_adapter else None
         engine = vllm.AsyncLLMEngine.from_engine_args(engine_args)
+
+        sampling_params = vllm.SamplingParams(
+            max_tokens=200, 
+            temperature=0.1,
+            skip_special_tokens=False
+        )
 
         def new_rollout(task_spec: TaskSpec):
             return UITARS15_Rollout(
                 task_spec=task_spec,
                 async_engine=engine,
-                sampling_params=vllm.SamplingParams(max_tokens=200, temperature=0.1),
+                sampling_params=sampling_params,
                 max_images_in_context=10,
                 lora_request=lora_request
             )
@@ -77,6 +81,8 @@ async def main(
             max_steps=max_steps,
             on_rollout_finish=partial(on_rollout_finish, output_dir=output_dir)
         )
+
+        engine
 
 
 def on_rollout_finish(result: RolloutResult, output_dir: Path):
@@ -169,11 +175,11 @@ if __name__ == "__main__":
 
     try:
         asyncio.run(main(
-            model_name=args.model_name,
             strategy=rollout_strategy,
             max_parallel=args.max_parallel,
             max_steps=args.max_steps,
-            output_dir=output_dir
+            output_dir=output_dir,
+            lora_adapter=args.lora_adapter
         ))
     except KeyboardInterrupt:
         logging.info("Script interrupted by user (Ctrl+C)")

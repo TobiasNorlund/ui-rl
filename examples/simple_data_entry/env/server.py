@@ -70,7 +70,7 @@ async def act(
     
     await asyncio.sleep(delay)
 
-    img = await computer.screenshot()
+    img = computer.screenshot()
     buf = BytesIO()
     img.save(buf, format="PNG")
     return Response(buf.getvalue(), media_type="image/png")

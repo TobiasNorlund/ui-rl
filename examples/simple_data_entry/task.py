@@ -23,5 +23,5 @@ Finally, click "Skicka" to submit the form, and continue with the next row. Only
         # Assume docker runtime
         assert isinstance(runtime, DockerSessionRuntime), "runtime must be a DockerSessionRuntime"
         return runtime.create_session(
-            image="ui-verifiers/simple-data-entry:latest",
+            image="ui-rl/simple-data-entry:latest",
         )

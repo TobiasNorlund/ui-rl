@@ -4,6 +4,7 @@ import h5py
 import pickle
 from PIL import Image
 import asyncio
+import numpy as np
 import logging
 import uuid
 import re
@@ -119,8 +120,8 @@ class UITARS15_Rollout:
         if request_output.outputs[0].finish_reason != "stop":
             logger.warning(f"Generation did not finish normally: {request_output.outputs[0].finish_reason}")
 
-        generated_text = request_output.outputs[0].text
         generated_token_ids = request_output.outputs[0].token_ids
+        generated_text = request_output.outputs[0].text
 
         self._completions.append(Completion(
             prompt_token_ids=prompt_token_ids,
@@ -161,15 +162,17 @@ class UITARS15_Rollout:
         return messages, images
 
     def save(self, filepath: str | Path):
-        with h5py.File(filepath, 'w') as f:
+        with h5py.File(filepath, 'w', driver="core") as f:
             for i, c in enumerate(self._completions):
                 f[f"completions/{i}/prompt_token_ids"] = c.prompt_token_ids
                 f[f"completions/{i}/generated_text"] = c.generated_text
                 f[f"completions/{i}/generated_token_ids"] = c.generated_token_ids
                 f[f"completions/{i}/images"] = [self._images.index(img) for img in c.images]
-            f["images"] = [png_encode(img) for img in self._images]
-            f["task_spec"] = pickle.dumps(self._task_spec.as_dict())
-            f["progress"] = pickle.dumps(self._progress)
+            encoded_images = [np.frombuffer(png_encode(img), dtype=np.uint8) for img in self._images]
+            images_ds = f.create_dataset("images", (len(encoded_images),), dtype=h5py.vlen_dtype(np.uint8))
+            images_ds[:] = encoded_images
+            f["task_spec"] = np.void(pickle.dumps(self._task_spec.as_dict()))
+            f["progress"] = np.void(pickle.dumps(self._progress))
 
 
 class Completion(NamedTuple):

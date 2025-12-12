@@ -47,4 +47,4 @@ async def run_cua_rollout(
         logger.error(f"({session_id}): {str(e)}")
         raise
     finally:
-        await runtime.teardown_session(session_id)
+        runtime.teardown_session(session_id)
