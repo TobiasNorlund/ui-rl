@@ -18,13 +18,17 @@ gcloud container clusters get-credentials simple-data-entry-cluster --region=eur
 kubectl get services
 
 # 4. Start vLLM model host
-VLLM_HTTP_TIMEOUT_KEEP_ALIVE=30 uv run vllm serve ByteDance-Seed/UI-TARS-1.5-7B --limit-mm-per-prompt '{"image":10, "video":0}' --max-num-seqs 8 \
-    --enable-lora --max-lora-rank 64 --lora-modules `find data/checkpoints/20251120_120610/ -mindepth 1 -maxdepth 1 -type d -printf "%f=%p "`
+VLLM_HTTP_TIMEOUT_KEEP_ALIVE=30 uv run vllm serve ByteDance-Seed/UI-TARS-1.5-7B --limit-mm-per-prompt '{"image":10, "video":0}' --max-num-seqs 8 --data-parallel-size 8 \
+    --enable-lora --max-lora-rank 64 --lora-modules step_2000=data/checkpoints/20251210_195352/step_2000 
+    
+#`find data/checkpoints/20251210_195352/ -mindepth 1 -maxdepth 1 -type d -printf "%f=%p "`
 
 # 5. Generate a batch of rollouts
-CLUSTER_HOST=`kubectl get service proxy-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`
-MODEL_HOST=localhost
-uv run ui_rl/rollout/generate_rollout_batch.py --cluster-host $CLUSTER_HOST:8000 --vllm-host $MODEL_HOST:8000 --strategy "nsuccess(2-101;1;100)" --model-name step_10000 --max-parallel 15
+#CLUSTER_HOST=`kubectl get service proxy-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`
+#MODEL_HOST=localhost
+#uv run ui_rl/rollout/generate_rollout_batch.py --cluster-host $CLUSTER_HOST:8000 --vllm-host $MODEL_HOST:8000 --strategy "nsuccess(2-101;1;100)" --model-name step_10000 --max-parallel 15
+
+uv run rollout_uitars15_docker.py --vllm-host localhost:8000 --strategy "nsuccess(2-101;1;15;100)" --model-name step_2000 --max-parallel 120
 
 # 7. Run SFT on the successful rollouts (=rejection sampling)
 uv run ui_rl/train.py \

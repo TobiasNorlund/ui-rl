@@ -46,12 +46,12 @@ class DockerSessionRuntime(CUASessionRuntime):
         self._container_kwargs = container_kwargs
         self._containers: dict[str, Container] = {}
 
-    def create_session(self, **kwargs) -> str:
+    async def create_session(self, **kwargs) -> str:
         session_id = str(uuid.uuid4())[:8]
         container_name = f"session-{session_id}"
 
         # Run container in detached mode with --rm (auto-remove on stop)
-        container = self._docker_client.containers.run(
+        container = await asyncio.to_thread(self._docker_client.containers.run, 
             name=container_name,
             detach=True,
             remove=True,
@@ -62,11 +62,11 @@ class DockerSessionRuntime(CUASessionRuntime):
         self._containers[session_id] = container
         return session_id
 
-    def teardown_session(self, session_id: str):
+    async def teardown_session(self, session_id: str):
         container = self._containers.get(session_id)
         if container:
             try:
-                container.stop()
+                await asyncio.to_thread(container.stop)
             except Exception as e:
                 logger.warning(f"({session_id}) Error stopping container: {e}")
             finally:

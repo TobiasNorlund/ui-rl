@@ -27,7 +27,7 @@ async def main(
         format='%(asctime)s %(levelname)s %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(log_file, mode='a')
+            logging.FileHandler(log_file, mode='w')
         ]
     )
     # Disable verbose logging from httpx
@@ -37,9 +37,14 @@ async def main(
     logging.info(f"Logs will be saved to: {output_dir}")
 
     # Use a global httpx session
-    async with httpx.AsyncClient(timeout=30) as httpx_client:
+    limits = httpx.Limits(max_keepalive_connections=200, max_connections=200)
+    timeout = httpx.Timeout(
+        60.0,           # Default for connect, read, write
+        pool=None       # ALLOW requests to wait indefinitely for a connection if needed
+    )
+    async with httpx.AsyncClient(limits=limits, timeout=timeout) as httpx_client:
         # Create docker session runtime 
-        runtime = DockerSessionRuntime(httpx_client=httpx_client)
+        runtime = DockerSessionRuntime(httpx_client=httpx_client, session_timeout=60)
 
         # Run rollouts
         await run_rollouts(
@@ -130,10 +135,11 @@ if __name__ == "__main__":
         formatter_class=WideHelpFormatter
     )
     parser.add_argument("--vllm-host", required=True, help="vLLM host")
+    parser.add_argument("--model-name")
     parser.add_argument("--strategy", required=True, help="Rollout strategy to use")
     parser.add_argument("--max-parallel", type=int, default=1, help="Maximum number of parallel rollouts")
     parser.add_argument("--max-steps", type=int, default=20, help="Maximum steps per rollout")
-    parser.add_argument("--output-dir", help="Dir to save rollouts and logs")
+    parser.add_argument("--output-dir", type=Path, help="Dir to save rollouts and logs")
     args = parser.parse_args()
 
     if args.output_dir is None:

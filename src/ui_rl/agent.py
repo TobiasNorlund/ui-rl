@@ -18,7 +18,7 @@ async def run_cua_rollout(
     """
     Launches a session, awaits it ready, and executes a Computer Use agent in it.
     """
-    session_id = task_spec.create_session(runtime)
+    session_id = await task_spec.create_session(runtime)
     try:
         logger.info(f"({session_id}) Starting...")
         await runtime.session_ready(session_id)
