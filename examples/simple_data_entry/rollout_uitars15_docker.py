@@ -38,10 +38,7 @@ async def main(
 
     # Use a global httpx session
     limits = httpx.Limits(max_keepalive_connections=200, max_connections=200)
-    timeout = httpx.Timeout(
-        60.0,           # Default for connect, read, write
-        pool=None       # ALLOW requests to wait indefinitely for a connection if needed
-    )
+    timeout = httpx.Timeout(60.0, pool=None)
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as httpx_client:
         # Create docker session runtime 
         runtime = DockerSessionRuntime(httpx_client=httpx_client, session_timeout=60)

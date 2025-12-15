@@ -174,7 +174,6 @@ class UITARS15_Rollout:
             json.dump(rollout_json, f)
 
 
-
 @dataclass
 class Completion:
     context: List[Dict]
