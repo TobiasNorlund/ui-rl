@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from typing import Callable
+from typing import Callable, Coroutine
 from abc import ABC, abstractmethod
 import httpx
 from dataclasses import dataclass
@@ -127,11 +127,11 @@ async def run_rollout(
 
 async def run_rollouts(
     strategy: RolloutStrategy, 
-    rollout_factory: Callable[TaskSpec],
+    rollout_factory: Callable[[TaskSpec], UITARS15_Rollout],
     runtime: CUASessionRuntime, 
     max_parallel: int, 
     max_steps: int,
-    on_rollout_finish: Callable[[RolloutResult], None]
+    on_rollout_finish: Coroutine
 ):
     """
     Run and save rollouts using a rollout strategy
@@ -157,7 +157,7 @@ async def run_rollouts(
                 result: RolloutResult = await asyncio_task
                 
                 # Call callbacks
-                on_rollout_finish(result)
+                await on_rollout_finish(result)
                 strategy.on_rollout_finish(result)
                 
                 # Start next rollout

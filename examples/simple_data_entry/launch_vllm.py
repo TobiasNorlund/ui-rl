@@ -8,6 +8,9 @@ import os
 NGINX_TEMPLATE = """
 events {{}}
 http {{
+    # Allow large request bodies
+    client_max_body_size 200M;
+
     upstream vllm_backend {{
         hash $http_x_routing_id consistent;
         {server_list}
@@ -51,6 +54,7 @@ SERVICE_TEMPLATE = """
     runtime: nvidia
     environment:
       - CUDA_VISIBLE_DEVICES=0
+      - VLLM_HTTP_TIMEOUT_KEEP_ALIVE=60
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
       {extra_mount}
@@ -83,40 +87,11 @@ def get_gpu_count():
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], 
             encoding="utf-8"
         )
-        return len(result.strip().split('\\n'))
+        return len(result.strip().split("\n"))
     except Exception:
         print("⚠️  Could not detect GPUs. Defaulting to 1.")
         return 1
-
-def generate_files(gpu_count: int, model_name: str, vllm_args):
-    print(f"⚙️  Generating static config for {gpu_count} GPUs...")
-    print(f"   Model: {model_name}")
-
-    # 1. Nginx Config
-    servers = [f"server vllm-gpu-{i}:8000 max_fails=1 fail_timeout=5s;" for i in range(gpu_count)]
-    with open("nginx.conf", "w") as f:
-        f.write(NGINX_TEMPLATE.format(server_list="\n        ".join(servers)))
-
-    # 2. Docker Compose
-    depends_on = [f"- vllm-gpu-{i}" for i in range(gpu_count)]
-    services_yaml = ""
     
-    for i in range(gpu_count):
-        services_yaml += SERVICE_TEMPLATE.format(
-            id=i,
-            model_name=model_name,
-            vllm_args=vllm_args
-        )
-        
-    compose_content = (
-        COMPOSE_HEADER.format(port=8000, depends_on_list="\n      ".join(depends_on)) +
-        services_yaml + 
-        COMPOSE_FOOTER
-    )
-    
-    with open("docker-compose.yml", "w") as f:
-        f.write(compose_content)
-
 
 def launch(gpus: list[int], model_name: str, extra_mount: str | None, vllm_args: list[str]):
     # Write nginx.conf and docker compose
@@ -150,9 +125,12 @@ def launch(gpus: list[int], model_name: str, extra_mount: str | None, vllm_args:
         )
         with open(os.path.join(tmpdir, "docker-compose.yml"), "w") as f:
             f.write(compose_content)
-
+        
         # Launch
         subprocess.run(["docker", "compose", "-f", os.path.join(tmpdir, "docker-compose.yml"), "up"], env=os.environ.copy())
+
+        # Cleanup
+        subprocess.run(["docker", "compose", "-f", os.path.join(tmpdir, "docker-compose.yml"), "down"])
 
 
 if __name__ == "__main__":

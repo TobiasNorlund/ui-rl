@@ -39,7 +39,7 @@ async def main(
     logging.info(f"Logs will be saved to: {output_dir}")
 
     # Use a global httpx session
-    limits = httpx.Limits(max_keepalive_connections=200, max_connections=200)
+    limits = httpx.Limits(max_keepalive_connections=1000, max_connections=1000)
     timeout = httpx.Timeout(60.0, pool=None)
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as httpx_client:
         # Create docker session runtime 
@@ -59,25 +59,21 @@ async def main(
         # Run rollouts
         await run_rollouts(
             strategy=strategy,
-            vllm_host=vllm_host,
-            model_name=model_name,
+            rollout_factory=rollout_factory,
             runtime=runtime,
             max_parallel=max_parallel,
             max_steps=max_steps,
-            httpx_client=httpx_client,
             on_rollout_finish=partial(on_rollout_finish, output_dir=output_dir)
         )
 
 
-def on_rollout_finish(result: RolloutResult, output_dir: Path):
+async def on_rollout_finish(result: RolloutResult, output_dir: Path):
     """
     Save rollouts that finished without error
     """
     if result.error is None:
-        if is_rollout_correct(result):
-            result.rollout.save(output_dir / f"rollout_{result.rollout_id:04d}_success.json")
-        else:
-            result.rollout.save(output_dir / f"rollout_{result.rollout_id:04d}_fail.json")
+        name = f"rollout_{result.rollout_id:04d}_success.json" if is_rollout_correct(result) else f"rollout_{result.rollout_id:04d}_fail.json"
+        await result.rollout.save(output_dir / name)
 
 
 def is_rollout_correct(result: RolloutResult) -> bool:
@@ -145,7 +141,7 @@ if __name__ == "__main__":
         formatter_class=WideHelpFormatter
     )
     parser.add_argument("--vllm-host", required=True, help="vLLM host")
-    parser.add_argument("--model-name")
+    parser.add_argument("--model-name", required=True, help="The model name")
     parser.add_argument("--strategy", required=True, help="Rollout strategy to use")
     parser.add_argument("--max-parallel", type=int, default=1, help="Maximum number of parallel rollouts")
     parser.add_argument("--max-steps", type=int, default=20, help="Maximum steps per rollout")

@@ -5,6 +5,7 @@ import base64
 import httpx
 import asyncio
 import logging
+import uuid
 import re
 from dataclasses import dataclass
 from typing import List, Dict
@@ -66,6 +67,9 @@ class UITARS15_Rollout:
         self._client = httpx_client
         self._max_images_in_context = max_images_in_context
         self._inference_kwargs = inference_kwargs
+
+        # Generate a random id, to ensure load balancer routes to same gpu for kv cache efficiency
+        self._rollout_id = str(uuid.uuid4())[:8]
 
     @property
     def progress(self) -> dict | None:
@@ -138,7 +142,10 @@ class UITARS15_Rollout:
             try:
                 resp = await self._client.post(
                     url=f"http://{self._model_host}/v1/chat/completions",
-                    headers={"Content-Type": "application/json"},
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Routing-ID": self._rollout_id
+                    },
                     json=kwargs,
                 )
                 resp.raise_for_status()
@@ -154,7 +161,7 @@ class UITARS15_Rollout:
                     logging.error(f"Request failed after 3 attempts: {str(e)}")
                     raise
 
-    def save(self, filepath: str | Path):
+    async def save(self, filepath: str | Path):
         rollout_json = {
             "task": self._task_spec.as_dict(),
             "messages": self._messages,
@@ -169,8 +176,12 @@ class UITARS15_Rollout:
             ],
             "progress": self._progress
         }
-        with open(filepath, 'w') as f:
-            json.dump(rollout_json, f)
+
+        def _save():
+            with open(filepath, 'w') as f:
+                json.dump(rollout_json, f)
+
+        await asyncio.to_thread(_save)
 
 
 @dataclass
