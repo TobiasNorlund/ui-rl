@@ -7,9 +7,11 @@ from pathlib import Path
 from functools import partial
 
 from ui_rl import RolloutResult, RolloutStrategy, FixedStrategy, NSuccessfulStrategy, run_rollouts
+from ui_rl.models.uitars15.rollout import UITARS15_Rollout
 from ui_rl.runtime.docker import DockerSessionRuntime
 
 from task import SimpleDataEntryTaskSpec
+from ui_rl.task import TaskSpec
 
 
 async def main(
@@ -43,11 +45,22 @@ async def main(
         # Create docker session runtime 
         runtime = DockerSessionRuntime(httpx_client=httpx_client, session_timeout=60)
 
+        def rollout_factory(task_spec: TaskSpec):
+            return UITARS15_Rollout(
+                task_spec=task_spec,
+                model_host=vllm_host,
+                model_name=model_name,
+                httpx_client=httpx_client,
+                max_images_in_context=10,
+                max_tokens=200,
+                temperature=0.1
+            )
+
         # Run rollouts
         await run_rollouts(
+            strategy=strategy,
             vllm_host=vllm_host,
             model_name=model_name,
-            strategy=strategy,
             runtime=runtime,
             max_parallel=max_parallel,
             max_steps=max_steps,

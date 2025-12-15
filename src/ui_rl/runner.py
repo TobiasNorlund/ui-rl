@@ -99,24 +99,15 @@ class NSuccessfulStrategy(RolloutStrategy):
 
 async def run_rollout(
     rollout_id: int,
+    rollout: UITARS15_Rollout,
     task_spec: TaskSpec,
     runtime: CUASessionRuntime,
-    model_host: str,
-    model_name: str,
     max_steps: int,
-    httpx_client: httpx.AsyncClient
 ) -> RolloutResult:
     """
     Run a single rollout and return the result
     """
     logger.info(f"Starting UITARS rollout for task: {task_spec}")
-    rollout = UITARS15_Rollout(
-        task_instruction=task_spec,
-        model_host=model_host,
-        model_name=model_name,
-        httpx_client=httpx_client,
-        temperature=0.1
-    )
     try:
         await run_cua_rollout(
             task_spec=task_spec,
@@ -135,13 +126,11 @@ async def run_rollout(
 
 
 async def run_rollouts(
-    vllm_host: str, 
-    model_name: str, 
     strategy: RolloutStrategy, 
+    rollout_factory: Callable[TaskSpec],
     runtime: CUASessionRuntime, 
     max_parallel: int, 
     max_steps: int,
-    httpx_client: httpx.AsyncClient,
     on_rollout_finish: Callable[[RolloutResult], None]
 ):
     """
@@ -151,9 +140,10 @@ async def run_rollouts(
     asyncio_tasks = set()
     for next_rollout_id in range(1, max_parallel+1):
         if (next_task_spec := strategy.next_task()) is not None:
+            rollout = rollout_factory(next_task_spec)
             asyncio_tasks.add(
                 asyncio.create_task(
-                    run_rollout(next_rollout_id, next_task_spec, runtime, vllm_host, model_name, max_steps, httpx_client)
+                    run_rollout(next_rollout_id, rollout, next_task_spec, runtime, max_steps)
                 )
             )
         else:
@@ -173,9 +163,10 @@ async def run_rollouts(
                 # Start next rollout
                 if (next_task_spec := strategy.next_task()) is not None:
                     next_rollout_id += 1
+                    rollout = rollout_factory(next_task_spec)
                     asyncio_tasks.add(
                         asyncio.create_task(
-                            run_rollout(next_rollout_id, next_task_spec, runtime, vllm_host, model_name, max_steps, httpx_client)
+                            run_rollout(next_rollout_id, rollout, next_task_spec, runtime, max_steps)
                         )
                     )
                 else:

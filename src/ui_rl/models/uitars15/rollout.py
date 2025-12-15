@@ -45,29 +45,27 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 class UITARS15_Rollout:
     def __init__(
         self, 
-        task_instruction: TaskSpec, 
+        task_spec: TaskSpec, 
         model_host: str, 
         model_name: str,
         httpx_client: httpx.AsyncClient, 
         max_images_in_context: int = 10,
-        max_completion_tokens: int = 200,
-        temperature: float = 1.0
+        **inference_kwargs
     ):
         self._messages = [{
             "role": "user", "content": [{
                 "type": "text",
-                "text": UI_TARS_PROMPT.format(user_instruction=task_instruction.get_task_instruction()),
+                "text": UI_TARS_PROMPT.format(user_instruction=task_spec.get_task_instruction()),
              }]
         }]
         self._completions: List[Completion] = []
-        self._task_instruction = task_instruction
+        self._task_spec = task_spec
         self._progress: dict | None = None
         self._model_host = model_host
         self._model_name = model_name
         self._client = httpx_client
         self._max_images_in_context = max_images_in_context
-        self._max_completion_tokens = max_completion_tokens
-        self._temperature = temperature
+        self._inference_kwargs = inference_kwargs
 
     @property
     def progress(self) -> dict | None:
@@ -87,26 +85,26 @@ class UITARS15_Rollout:
         })
 
         # Get messages to predict next action
-        context = self._get_completion_context()
+        prompt_messages = self._get_prompt_messages()
         response = await self._request_completion(
             model=self._model_name,
-            messages=context,
-            temperature=self._temperature,
-            max_tokens=self._max_completion_tokens,
+            messages=prompt_messages,
             skip_special_tokens=False,
-            logprobs=1,
+            return_token_ids=True,
+            **self._inference_kwargs
         )
 
         if "choices" not in response or len(response["choices"]) == 0:
             raise ValueError("No output from model")
 
-        completion_message = response["choices"][0]["message"]
-        logprobs = response["choices"][0]["logprobs"]["content"]
+        completion_message: dict = response["choices"][0]["message"]
 
         completion = Completion(
-            context=context,
-            completion_message=completion_message,
-            logprobs=logprobs
+            prompt_token_ids=response["prompt_token_ids"],
+            prompt_messages=prompt_messages,
+            generated_token_ids=response["choices"][0]["token_ids"],
+            generated_message=completion_message,
+
         )
 
         self._messages.append(completion_message)
@@ -120,7 +118,7 @@ class UITARS15_Rollout:
 
         return await parse_action(action_str)
 
-    def _get_completion_context(self):
+    def _get_prompt_messages(self):
         messages = []
         messages.append(self._messages[0]) # Add prompt message
 
@@ -158,13 +156,14 @@ class UITARS15_Rollout:
 
     def save(self, filepath: str | Path):
         rollout_json = {
-            "task": self._task_instruction.as_dict(),
+            "task": self._task_spec.as_dict(),
             "messages": self._messages,
             "completions": [
                 {
-                    "context": [self._messages.index(m) for m in completion.context],
-                    "completion": self._messages.index(completion.completion_message),
-                    "logprobs": completion.logprobs
+                    "prompt_token_ids": completion.prompt_token_ids,
+                    "prompt_messages": [self._messages.index(m) for m in completion.prompt_messages],
+                    "generated_token_ids": completion.generated_token_ids,
+                    "generated_message": self._messages.index(completion.generated_message),
                 }
                 for completion in self._completions
             ],
@@ -176,9 +175,10 @@ class UITARS15_Rollout:
 
 @dataclass
 class Completion:
-    context: List[Dict]
-    completion_message: Dict
-    logprobs: Dict
+    prompt_token_ids: List[int]
+    prompt_messages: List[Dict]
+    generated_token_ids: List[int]
+    generated_message: Dict
 
 
 def parse_response_string(response_string: str):
