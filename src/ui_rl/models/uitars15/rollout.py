@@ -3,7 +3,7 @@ from pathlib import Path
 from io import BytesIO
 import base64
 import httpx
-import asyncio
+import time
 import logging
 import uuid
 import re
@@ -45,11 +45,11 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 
 class UITARS15_Rollout:
     def __init__(
-        self, 
-        task_spec: TaskSpec, 
-        model_host: str, 
+        self,
+        task_spec: TaskSpec,
+        model_host: str,
         model_name: str,
-        httpx_client: httpx.AsyncClient, 
+        httpx_client: httpx.Client,
         max_images_in_context: int = 10,
         **inference_kwargs
     ):
@@ -79,7 +79,7 @@ class UITARS15_Rollout:
     def progress(self, progress: dict):
         self._progress = progress
 
-    async def predict_next_action(self, new_state: State) -> Action | None:
+    def predict_next_action(self, new_state: State) -> Action | None:
         # Add new state to messages list
         self._messages.append({
             "role": "user", "content": [{
@@ -90,7 +90,7 @@ class UITARS15_Rollout:
 
         # Get messages to predict next action
         prompt_messages = self._get_prompt_messages()
-        response = await self._request_completion(
+        response = self._request_completion(
             model=self._model_name,
             messages=prompt_messages,
             skip_special_tokens=False,
@@ -120,7 +120,7 @@ class UITARS15_Rollout:
         if action_str in ("finished()", "call_user()"):
             return None
 
-        return await parse_action(action_str)
+        return parse_action(action_str)
 
     def _get_prompt_messages(self):
         messages = []
@@ -137,10 +137,10 @@ class UITARS15_Rollout:
             messages += self._messages[cap_idx:]
         return messages
 
-    async def _request_completion(self, **kwargs):
+    def _request_completion(self, **kwargs):
         for attempt in range(3):
             try:
-                resp = await self._client.post(
+                resp = self._client.post(
                     url=f"http://{self._model_host}/v1/chat/completions",
                     headers={
                         "Content-Type": "application/json",
@@ -150,18 +150,16 @@ class UITARS15_Rollout:
                 )
                 resp.raise_for_status()
                 return resp.json()
-            except asyncio.CancelledError:
-                raise
             except httpx.HTTPError as e:
                 if attempt < 2:  # Not the last attempt
                     logging.warning(f"Error predicting next action: {str(e)} (attempt {attempt + 1}/3)")
-                    await asyncio.sleep(0.1)
+                    time.sleep(0.1)
                     continue
                 else:
                     logging.error(f"Request failed after 3 attempts: {str(e)}")
                     raise
 
-    async def save(self, filepath: str | Path):
+    def save(self, filepath: str | Path):
         rollout_json = {
             "task": self._task_spec.as_dict(),
             "messages": self._messages,
@@ -177,11 +175,8 @@ class UITARS15_Rollout:
             "progress": self._progress
         }
 
-        def _save():
-            with open(filepath, 'w') as f:
-                json.dump(rollout_json, f)
-
-        await asyncio.to_thread(_save)
+        with open(filepath, 'w') as f:
+            json.dump(rollout_json, f)
 
 
 @dataclass
@@ -224,7 +219,7 @@ def parse_response_string(response_string: str):
     return thought, reflection, action_str
 
 
-async def parse_action(action_str: str) -> Action | None:
+def parse_action(action_str: str) -> Action | None:
     action_str = action_str.strip()
     if action_str.startswith("click("):
         match = re.search(r"click\(start_box='<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>'\)", action_str)
@@ -233,7 +228,7 @@ async def parse_action(action_str: str) -> Action | None:
             return Action(action_type=ActionType.LeftClick, x=x, y=y)
         else:
             raise ValueError(f"Couldn't parse action: {action_str}")
-        
+
     elif action_str.startswith("left_double("):
         match = re.search(r"left_double\(start_box='<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>'\)", action_str)
         if match:
@@ -241,7 +236,7 @@ async def parse_action(action_str: str) -> Action | None:
             return Action(action_type=ActionType.DoubleClick, x=x, y=y)
         else:
             raise ValueError(f"Couldn't parse action: {action_str}")
-        
+
     elif action_str.startswith("right_single("):
         match = re.search(r"right_single\(start_box='<\|box_start\|>\((\d+),(\d+)\)<\|box_end\|>'\)", action_str)
         if match:
@@ -249,7 +244,7 @@ async def parse_action(action_str: str) -> Action | None:
             return Action(action_type=ActionType.RightClick, x=x, y=y)
         else:
             raise ValueError(f"Couldn't parse action: {action_str}")
-        
+
     elif action_str.startswith("hotkey("):
         match = re.search(r"hotkey\(key='([^']+)'\)", action_str)
         if match:
@@ -257,7 +252,7 @@ async def parse_action(action_str: str) -> Action | None:
             return Action(action_type=ActionType.Keys, keys=key.replace(" ", "+"))
         else:
             raise ValueError(f"Couldn't parse action: {action_str}")
-        
+
     elif action_str.startswith("type("):
         match = re.search(r"type\(content='([^']*)'\)", action_str)
         if match:
@@ -266,7 +261,7 @@ async def parse_action(action_str: str) -> Action | None:
             # TODO: If the content ends with \n, we assume it's a submit action
         else:
             raise ValueError(f"Couldn't parse action: {action_str}")
-        
+
     elif action_str.startswith("scroll("):
         # 1. Regex to extract start_box coordinates (x and y)
         box_regex = r"start_box='<\|box_start\|>\((?P<x>\d+),(?P<y>\d+)\)<\|box_end\|>'"
@@ -282,19 +277,19 @@ async def parse_action(action_str: str) -> Action | None:
                 # Extract and convert coordinates
                 x = int(box_match.group('x'))
                 y = int(box_match.group('y'))
-                
+
                 # Extract direction
                 direction = direction_match.group('direction')
-                
+
                 return Action(action_type=ActionType.Scroll, direction=direction, x=x, y=y)
             except ValueError as e:
                 # Catch potential errors during integer conversion
                 raise ValueError(f"Error converting coordinates in action: {action_str}. Details: {e}")
         else:
             raise ValueError(f"Couldn't parse all required arguments in action: {action_str}")
-        
+
     elif action_str.startswith("wait()"):
-        await asyncio.sleep(1)
+        time.sleep(1)
         return Action(action_type=ActionType.Screenshot)
     else:
         return None

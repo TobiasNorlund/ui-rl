@@ -5,21 +5,21 @@ from ..cua import Action, State
 class CUASessionRuntime(ABC):
 
     @abstractmethod
-    async def create_session(self, *args, **kwargs) -> str:
+    def create_session(self, *args, **kwargs) -> str:
         pass
 
     @abstractmethod
-    async def teardown_session(self, session_id: str):
+    def teardown_session(self, session_id: str):
         pass
 
     @abstractmethod
-    async def session_ready(self, session_id: str):
+    def session_ready(self, session_id: str):
         pass
 
     @abstractmethod
-    async def session_act(self, session_id: str, action: Action) -> State:
+    def session_act(self, session_id: str, action: Action) -> State:
         pass
 
     @abstractmethod
-    async def get_session_progress(self, session_id: str) -> dict:
+    def get_session_progress(self, session_id: str) -> dict:
         pass

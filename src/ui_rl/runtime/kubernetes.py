@@ -7,7 +7,7 @@ from PIL import Image
 import logging
 import io
 import uuid
-import asyncio
+import time
 import httpx
 from . import CUASessionRuntime
 from ..cua import State, Action
@@ -25,9 +25,9 @@ class KubernetesSessionRuntime(CUASessionRuntime):
     """
 
     def __init__(
-        self, 
+        self,
         host: str,
-        httpx_client: httpx.AsyncClient,
+        httpx_client: httpx.Client,
         session_timeout: int = 60 * 3,  # Timeout in seconds for session to come online
     ):
         config.load_kube_config()
@@ -45,39 +45,37 @@ class KubernetesSessionRuntime(CUASessionRuntime):
         )
         return session_id
 
-    async def teardown_session(self, session_id: str):
+    def teardown_session(self, session_id: str):
         self._core_v1.delete_namespaced_pod(
             name=f"session-{session_id}",
             namespace='default'
         )
 
-    async def session_ready(self, session_id: str):
+    def session_ready(self, session_id: str):
         start_time = datetime.now()
         while (datetime.now() - start_time).seconds < self._session_timeout:
             try:
-                resp = await self._httpx_client.get(
+                resp = self._httpx_client.get(
                     f"http://{self._host}/proxy/{session_id}/",
                 )
                 if resp.status_code == 200:
                     break
                 else:
-                    await asyncio.sleep(2)
-            except (httpx.HTTPError, asyncio.TimeoutError):
-                await asyncio.sleep(2)
+                    time.sleep(2)
+            except httpx.HTTPError:
+                time.sleep(2)
                 continue
-            except asyncio.CancelledError:
-                raise
         else:
             raise RuntimeError(f"Session {session_id} never came up")
 
-    async def session_act(self, session_id: str, action: Action) -> State:
+    def session_act(self, session_id: str, action: Action) -> State:
         qs = "&".join(f"{k}={quote(str(v))}" for k, v in asdict(action).items() if v is not None)
         url = f"http://{self._host}/proxy/{session_id}/act?{qs}"
 
         # Retry up to 3 times on 5xx errors
         for attempt in range(3):
             try:
-                resp = await self._httpx_client.get(url)
+                resp = self._httpx_client.get(url)
                 # Check for 5xx server errors
                 if resp.status_code >= 500:
                     if attempt < 2:  # Not the last attempt
@@ -98,13 +96,10 @@ class KubernetesSessionRuntime(CUASessionRuntime):
                     logger.error(f"({session_id}) Failed to parse response as image: {e}")
                     raise ValueError(f"Invalid image response: {e}")
 
-            except asyncio.CancelledError:
-                raise
-
             except httpx.HTTPError as e:
                 if attempt < 2:  # Not the last attempt
                     logger.warning(f"({session_id}) Error acting: {str(e)} (attempt {attempt + 1}/3)")
-                    await asyncio.sleep(1)
+                    time.sleep(1)
                     continue
                 else:
                     logger.error(f"({session_id}) Act failed after 3 attempts: {str(e)}")
@@ -112,13 +107,13 @@ class KubernetesSessionRuntime(CUASessionRuntime):
         else:
             raise RuntimeError()  # won't reach here
 
-    async def get_session_progress(self, session_id: str) -> dict:
+    def get_session_progress(self, session_id: str) -> dict:
         url = f"http://{self._host}/proxy/{session_id}/progress"
 
         # Retry up to 3 times on 5xx errors
         for attempt in range(3):
             try:
-                resp = await self._httpx_client.get(url)
+                resp = self._httpx_client.get(url)
                 # Check for 5xx server errors
                 if resp.status_code >= 500:
                     if attempt < 2:  # Not the last attempt
@@ -141,7 +136,7 @@ class KubernetesSessionRuntime(CUASessionRuntime):
             except httpx.HTTPError as e:
                 if attempt < 2:  # Not the last attempt
                     logger.warning(f"({session_id}) Error getting progress: {str(e)} (attempt {attempt + 1}/3)")
-                    await asyncio.sleep(1)
+                    time.sleep(1)
                     continue
                 else:
                     logger.error(f"({session_id}) Failed getting progress after 3 attempts: {str(e)}")

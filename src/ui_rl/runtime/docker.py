@@ -6,7 +6,7 @@ from PIL import Image
 import logging
 import io
 import uuid
-import asyncio
+import time
 import httpx
 import docker  # type: ignore
 from docker.models.containers import Container  # type: ignore
@@ -27,7 +27,7 @@ class DockerSessionRuntime(CUASessionRuntime):
         self,
         port: int = 8000,
         session_timeout: int = 30,  # Timeout in seconds for session to come online
-        httpx_client: Optional[httpx.AsyncClient] = None,
+        httpx_client: Optional[httpx.Client] = None,
         docker_client: Optional[docker.DockerClient] = None,
         **container_kwargs
     ):
@@ -42,16 +42,16 @@ class DockerSessionRuntime(CUASessionRuntime):
         self._port = port
         self._docker_client = docker_client or docker.from_env()
         self._session_timeout = session_timeout
-        self._httpx_client = httpx_client or httpx.AsyncClient(timeout=30.0)
+        self._httpx_client = httpx_client or httpx.Client(timeout=30.0)
         self._container_kwargs = container_kwargs
         self._containers: dict[str, Container] = {}
 
-    async def create_session(self, **kwargs) -> str:
+    def create_session(self, **kwargs) -> str:
         session_id = str(uuid.uuid4())[:8]
         container_name = f"session-{session_id}"
 
         # Run container in detached mode with --rm (auto-remove on stop)
-        container = await asyncio.to_thread(self._docker_client.containers.run, 
+        container = self._docker_client.containers.run(
             name=container_name,
             detach=True,
             remove=True,
@@ -62,17 +62,17 @@ class DockerSessionRuntime(CUASessionRuntime):
         self._containers[session_id] = container
         return session_id
 
-    async def teardown_session(self, session_id: str):
+    def teardown_session(self, session_id: str):
         container = self._containers.get(session_id)
         if container:
             try:
-                await asyncio.to_thread(container.stop)
+                container.stop()
             except Exception as e:
                 logger.warning(f"({session_id}) Error stopping container: {e}")
             finally:
                 del self._containers[session_id]
 
-    async def session_ready(self, session_id: str):
+    def session_ready(self, session_id: str):
         container = self._containers.get(session_id)
         if not container:
             raise RuntimeError(f"Session {session_id} not found")
@@ -81,7 +81,7 @@ class DockerSessionRuntime(CUASessionRuntime):
         while (datetime.now() - start_time).seconds < self._session_timeout:
             try:
                 # Check if container is still running
-                await asyncio.to_thread(container.reload)
+                container.reload()
                 if container.status != "running":
                     raise RuntimeError(f"Session {session_id} container stopped unexpectedly")
 
@@ -89,22 +89,20 @@ class DockerSessionRuntime(CUASessionRuntime):
                 container_ip = self._get_container_ip(container)
 
                 # Try to connect to the container's HTTP server via internal IP
-                resp = await self._httpx_client.get(
+                resp = self._httpx_client.get(
                     f"http://{container_ip}:{self._port}/",
                 )
                 if resp.status_code == 200:
                     break
                 else:
-                    await asyncio.sleep(2)
-            except (httpx.HTTPError, asyncio.TimeoutError):
-                await asyncio.sleep(2)
+                    time.sleep(2)
+            except httpx.HTTPError:
+                time.sleep(2)
                 continue
-            except asyncio.CancelledError:
-                raise
         else:
             raise RuntimeError(f"Session {session_id} never came up")
 
-    async def session_act(self, session_id: str, action: Action) -> State:
+    def session_act(self, session_id: str, action: Action) -> State:
         container = self._containers.get(session_id)
         if not container:
             raise RuntimeError(f"Session {session_id} not found")
@@ -118,7 +116,7 @@ class DockerSessionRuntime(CUASessionRuntime):
         # Retry up to 3 times on 5xx errors
         for attempt in range(3):
             try:
-                resp = await self._httpx_client.get(url)
+                resp = self._httpx_client.get(url)
                 # Check for 5xx server errors
                 if resp.status_code >= 500:
                     if attempt < 2:  # Not the last attempt
@@ -139,13 +137,10 @@ class DockerSessionRuntime(CUASessionRuntime):
                     logger.error(f"({session_id}) Failed to parse response as image: {e}")
                     raise ValueError(f"Invalid image response: {e}")
 
-            except asyncio.CancelledError:
-                raise
-
             except httpx.HTTPError as e:
                 if attempt < 2:  # Not the last attempt
                     logger.warning(f"({session_id}) Error acting: {str(e)} (attempt {attempt + 1}/3)")
-                    await asyncio.sleep(1)
+                    time.sleep(1)
                     continue
                 else:
                     logger.error(f"({session_id}) Act failed after 3 attempts: {str(e)}")
@@ -153,13 +148,12 @@ class DockerSessionRuntime(CUASessionRuntime):
         else:
             raise RuntimeError() # Won't reach here
 
-    async def get_session_progress(self, session_id: str) -> dict:
+    def get_session_progress(self, session_id: str) -> dict:
         container = self._containers.get(session_id)
         if not container:
             raise RuntimeError(f"Session {session_id} not found")
 
         # Get the container's internal IP
-        #await asyncio.to_thread(container.reload)
         container_ip = self._get_container_ip(container)
 
         url = f"http://{container_ip}:{self._port}/progress"
@@ -167,7 +161,7 @@ class DockerSessionRuntime(CUASessionRuntime):
         # Retry up to 3 times on 5xx errors
         for attempt in range(3):
             try:
-                resp = await self._httpx_client.get(url)
+                resp = self._httpx_client.get(url)
                 # Check for 5xx server errors
                 if resp.status_code >= 500:
                     if attempt < 2:  # Not the last attempt
@@ -190,7 +184,7 @@ class DockerSessionRuntime(CUASessionRuntime):
             except httpx.HTTPError as e:
                 if attempt < 2:  # Not the last attempt
                     logger.warning(f"({session_id}) Error getting progress: {str(e)} (attempt {attempt + 1}/3)")
-                    await asyncio.sleep(1)
+                    time.sleep(1)
                     continue
                 else:
                     logger.error(f"({session_id}) Failed getting progress after 3 attempts: {str(e)}")

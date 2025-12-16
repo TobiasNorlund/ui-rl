@@ -13,7 +13,7 @@ class TaskSpec(ABC):
         pass
 
     @abstractmethod
-    async def create_session(self, runtime: CUASessionRuntime):
+    def create_session(self, runtime: CUASessionRuntime):
         """
         Creates a session using `runtime.create_session(...)` for performing this task, and returns the session id string
         """

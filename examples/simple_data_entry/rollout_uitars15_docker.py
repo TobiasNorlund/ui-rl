@@ -1,6 +1,4 @@
-import asyncio
 import re
-import httpx
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -14,12 +12,12 @@ from task import SimpleDataEntryTaskSpec
 from ui_rl.task import TaskSpec
 
 
-async def main(
-    vllm_host: str, 
-    model_name: str, 
-    strategy: RolloutStrategy, 
-    max_parallel: int, 
-    max_steps: int, 
+def main(
+    vllm_host: str,
+    model_name: str,
+    strategy: RolloutStrategy,
+    max_parallel: int,
+    max_steps: int,
     output_dir: Path
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -38,42 +36,31 @@ async def main(
     logging.info(f"Starting generation of rollouts, using {max_parallel} parallel workers")
     logging.info(f"Logs will be saved to: {output_dir}")
 
-    # Use a global httpx session
-    limits = httpx.Limits(max_keepalive_connections=1000, max_connections=1000)
-    timeout = httpx.Timeout(60.0, pool=None)
-    async with httpx.AsyncClient(limits=limits, timeout=timeout) as httpx_client:
-        # Create docker session runtime 
-        runtime = DockerSessionRuntime(httpx_client=httpx_client, session_timeout=60)
-
-        def rollout_factory(task_spec: TaskSpec):
-            return UITARS15_Rollout(
-                task_spec=task_spec,
-                model_host=vllm_host,
-                model_name=model_name,
-                httpx_client=httpx_client,
-                max_images_in_context=10,
-                max_tokens=200,
-                temperature=0.1
-            )
-
-        # Run rollouts
-        await run_rollouts(
-            strategy=strategy,
-            rollout_factory=rollout_factory,
-            runtime=runtime,
-            max_parallel=max_parallel,
-            max_steps=max_steps,
-            on_rollout_finish=partial(on_rollout_finish, output_dir=output_dir)
-        )
+    # Run rollouts with multiprocessing
+    run_rollouts(
+        strategy=strategy,
+        model_host=vllm_host,
+        model_name=model_name,
+        max_parallel=max_parallel,
+        max_steps=max_steps,
+        on_rollout_finish=partial(on_rollout_finish, output_dir=output_dir),
+        runtime_class=DockerSessionRuntime,
+        runtime_kwargs={"session_timeout": 60},
+        rollout_kwargs={
+            "max_images_in_context": 10,
+            "max_tokens": 200,
+            "temperature": 0.1
+        }
+    )
 
 
-async def on_rollout_finish(result: RolloutResult, output_dir: Path):
+def on_rollout_finish(result: RolloutResult, output_dir: Path):
     """
     Save rollouts that finished without error
     """
     if result.error is None:
         name = f"rollout_{result.rollout_id:04d}_success.json" if is_rollout_correct(result) else f"rollout_{result.rollout_id:04d}_fail.json"
-        await result.rollout.save(output_dir / name)
+        result.rollout.save(output_dir / name)
 
 
 def is_rollout_correct(result: RolloutResult) -> bool:
@@ -157,14 +144,14 @@ if __name__ == "__main__":
     rollout_strategy = parse_strategy(args.strategy)
 
     try:
-        asyncio.run(main(
+        main(
             vllm_host=args.vllm_host,
             model_name=args.model_name,
             strategy=rollout_strategy,
             max_parallel=args.max_parallel,
             max_steps=args.max_steps,
             output_dir=output_dir
-        ))
+        )
     except KeyboardInterrupt:
         logging.info("Script interrupted by user (Ctrl+C)")
         exit(0)
