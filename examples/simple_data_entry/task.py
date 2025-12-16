@@ -12,6 +12,14 @@ class SimpleDataEntryTaskSpec(TaskSpec):
     def __str__(self):
         return f"SimpleDataEntry(rows={str(self.rows)})"
 
+    def __hash__(self):
+        return hash(tuple(self.rows))
+
+    def __eq__(self, other):
+        if not isinstance(other, SimpleDataEntryTaskSpec):
+            return False
+        return self.rows == other.rows
+
     def get_task_instruction(self):
         return f"""Your task is to submit data from a spreadsheet (seen on the left) into a form (seen on the right). Specifically, the following rows (as numbered in the left margin) from the spreadsheet are to be submitted: {", ".join(str(i) for i in self.rows)}.
 Note: You may need to scroll to make the row visible in the sheet.

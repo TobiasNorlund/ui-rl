@@ -1,1 +1,8 @@
-from .runner import run_rollout, run_rollouts, RolloutResult, RolloutStrategy, FixedStrategy, NSuccessfulStrategy
+from .runner import (
+    run_rollouts, 
+    RolloutResult, 
+    RolloutWorker,
+    RolloutStrategy, 
+    FixedStrategy, 
+    NSuccessfulStrategy
+) 

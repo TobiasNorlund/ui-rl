@@ -29,6 +29,7 @@ VLLM_HTTP_TIMEOUT_KEEP_ALIVE=30 uv run vllm serve ByteDance-Seed/UI-TARS-1.5-7B 
 #uv run ui_rl/rollout/generate_rollout_batch.py --cluster-host $CLUSTER_HOST:8000 --vllm-host $MODEL_HOST:8000 --strategy "nsuccess(2-101;1;100)" --model-name step_10000 --max-parallel 15
 
 uv run rollout_uitars15_docker.py --vllm-host localhost:8000 --strategy "nsuccess(2-101;1;15;100)" --model-name step_15000 --max-parallel 120
+uv run rollout_uitars15_docker.py --vllm-host localhost:8000 --model-name ByteDance-Seed/UI-TARS-1.5-7B --strategy "ncorrect(2-101;1;1;15)" --max-parallel 15
 
 # 7. Run SFT on the successful rollouts (=rejection sampling)
 uv run ui_rl/train.py \

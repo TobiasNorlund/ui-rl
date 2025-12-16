@@ -2,9 +2,10 @@ import re
 import logging
 from datetime import datetime
 from pathlib import Path
-from functools import partial
+from queue import Queue
 
-from ui_rl import RolloutResult, RolloutStrategy, FixedStrategy, NSuccessfulStrategy, run_rollouts
+from ui_rl import RolloutResult, RolloutStrategy, FixedStrategy, NSuccessfulStrategy, run_rollouts, RolloutWorker
+from ui_rl.agent import run_cua_rollout
 from ui_rl.models.uitars15.rollout import UITARS15_Rollout
 from ui_rl.runtime.docker import DockerSessionRuntime
 
@@ -28,7 +29,8 @@ def main(
         handlers=[
             logging.StreamHandler(),
             logging.FileHandler(log_file, mode='w')
-        ]
+        ],
+        force=True
     )
     # Disable verbose logging from httpx
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -36,51 +38,78 @@ def main(
     logging.info(f"Starting generation of rollouts, using {max_parallel} parallel workers")
     logging.info(f"Logs will be saved to: {output_dir}")
 
-    # Run rollouts with multiprocessing
-    run_rollouts(
-        strategy=strategy,
+    # Create worker
+    worker = SimpleDataEntryRolloutWorker(
         model_host=vllm_host,
         model_name=model_name,
-        max_parallel=max_parallel,
         max_steps=max_steps,
-        on_rollout_finish=partial(on_rollout_finish, output_dir=output_dir),
-        runtime_class=DockerSessionRuntime,
-        runtime_kwargs={"session_timeout": 60},
-        rollout_kwargs={
-            "max_images_in_context": 10,
-            "max_tokens": 200,
-            "temperature": 0.1
-        }
+        output_dir=output_dir
+    )
+
+    # Run rollouts
+    run_rollouts(
+        strategy=strategy,
+        rollout_worker=worker,
+        max_parallel=max_parallel,
     )
 
 
-def on_rollout_finish(result: RolloutResult, output_dir: Path):
-    """
-    Save rollouts that finished without error
-    """
-    if result.error is None:
-        name = f"rollout_{result.rollout_id:04d}_success.json" if is_rollout_correct(result) else f"rollout_{result.rollout_id:04d}_fail.json"
-        result.rollout.save(output_dir / name)
+class SimpleDataEntryRolloutWorker(RolloutWorker):
+    _runtime = None
+
+    def __init__(self, model_host: str, model_name: str, max_steps: int, output_dir: Path):
+        self._model_host = model_host
+        self._model_name = model_name
+        self._max_steps = max_steps
+        self._output_dir = output_dir
+
+    @classmethod
+    def init_worker(cls, log_queue: Queue):
+        super().init_worker(log_queue)
+
+        # Initialize docker runtime for this worker
+        cls._runtime = DockerSessionRuntime(httpx_client=cls._httpx_client, session_timeout=60)
+
+    def run(self, rollout_id: int, task_spec: TaskSpec):
+        rollout = UITARS15_Rollout(
+            task_spec=task_spec,
+            model_host=self._model_host,
+            model_name=self._model_name,
+            httpx_client=self._httpx_client,
+            max_images_in_context=10,
+            max_tokens=200,
+            temperature=0.1
+        )
+        logging.info(f"Starting UITARS rollout for task: {task_spec}")
+        try:
+            run_cua_rollout(
+                task_spec=task_spec,
+                rollout=rollout,
+                runtime=self._runtime,
+                max_steps=self._max_steps,
+            )
+            logging.info(f"Rollout {rollout_id} completed")
+
+            # Save rollout
+            result = RolloutResult(rollout_id, task_spec, rollout.progress, None)
+            file_name = f"rollout_{rollout_id:04d}_success.json" if rows_submitted_correctly(result) else f"rollout_{rollout_id:04d}_fail.json"
+            rollout.save(output_dir / file_name)
+            return result
+
+        except Exception as e:
+            logging.error(f"Rollout {rollout_id} was stopped due to an error: {e}")
+            return RolloutResult(rollout_id, task_spec, rollout.progress, e) 
 
 
-def is_rollout_correct(result: RolloutResult) -> bool:
+def rows_submitted_correctly(result: RolloutResult) -> bool:
     """
     Checks if all the instructed spreadsheet rows were actually submitted
     Note: In the spreadsheet, the first data row starts at no 2, but the "submitted_row_indices"
           start from 0, so we need to subtract 2 from the instructed row when matching
     """
     assert isinstance(result.task_spec, SimpleDataEntryTaskSpec)
-    return set(result.rollout.progress["submitted_row_indices"]) == set([r-2 for r in result.task_spec.rows])
-
-
-class NCorrectRowsStrategy(NSuccessfulStrategy):
-    def on_rollout_finish(self, result: RolloutResult):
-        """
-        Override to mark rollout successful when the submitted rows match the expected
-        """
-        self._inflight_counter[result.task_spec] -= 1
-        if result.error is None and is_rollout_correct(result):
-            self._success_counter[result.task_spec] += 1
+    return result.error is None and result.progress is not None and \
+        set(result.progress["submitted_row_indices"]) == set([r-2 for r in result.task_spec.rows])
 
 
 def parse_strategy(strategy: str) -> RolloutStrategy:
@@ -101,14 +130,15 @@ def parse_strategy(strategy: str) -> RolloutStrategy:
                 SimpleDataEntryTaskSpec(rows=[id])
                 for id in ids
             ])
-        case s if (m := re.match(r"ncorrect\((?P<ids>\S+);(?P<min_successful>\d+);(?P<max_inflight_per_task>\d+);(?P<max_attempts>\d+)\)", s)):
+        case s if (m := re.match(r"nsuccessful\((?P<ids>\S+);(?P<min_successful>\d+);(?P<max_inflight_per_task>\d+);(?P<max_attempts>\d+)\)", s)):
             ids = _get_ids(m.group("ids"))
-            return NCorrectRowsStrategy(
+            return NSuccessfulStrategy(
                 tasks=[
                     SimpleDataEntryTaskSpec(rows=[id])
                     for id in ids
                 ], 
-                min_successful=int(m.group("min_successful")), 
+                min_successful=int(m.group("min_successful")),
+                is_rollout_success=rows_submitted_correctly,
                 max_inflight_per_task=int(m.group("max_inflight_per_task")),
                 max_attempts=int(m.group("max_attempts"))
             )

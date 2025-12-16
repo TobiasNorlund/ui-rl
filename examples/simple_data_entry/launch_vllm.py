@@ -1,3 +1,4 @@
+import shlex
 import sys
 import tempfile
 import subprocess
@@ -111,7 +112,7 @@ def launch(gpus: list[int], model_name: str, extra_mount: str | None, vllm_args:
                 id=i,
                 model_name=model_name,
                 extra_mount=extra_mount_str,
-                vllm_args=" ".join(vllm_args)
+                vllm_args=" ".join(shlex.quote(arg) for arg in vllm_args)
             )
         depends_on = [f"- vllm-gpu-{i}" for i in gpus]
         compose_content = (
