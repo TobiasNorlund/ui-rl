@@ -39,7 +39,7 @@ def main(
     test_ds = UITARS15_SFTDataset(processor, test_rollouts)
 
     sampler = ErrorBasedTaskUpsampler(
-        idx2task={i: r.task["rows"][0] for i, r in train_ds.seqidx2rollout.items()},
+        idx2task={i: r.task_spec["rows"][0] for i, r in train_ds.seqidx2rollout.items()},
         task_error_rates=task_error_rates, 
         temperature=sampler_temperature
     ) if task_error_rates is not None else None
@@ -48,22 +48,17 @@ def main(
     test_dataloader = DataLoader(test_ds, batch_size=1, collate_fn=lambda x: x[0], num_workers=1)
 
     # Load model
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+    )
     if lora_adapter_path is not None:
         # Continue training from an existing LoRA adapter
         print(f"Loading LoRA adapter from: {lora_adapter_path}")
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            model_name,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-        )
         model = PeftModel.from_pretrained(model, lora_adapter_path, is_trainable=True)
     else:
         # Start fresh with new LoRA adapter
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            model_name,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-        )
         lora_config = LoraConfig(
             r=64,
             lora_alpha=64,
@@ -225,7 +220,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--rollouts", required=True)
-    parser.add_argument("--num-test-rollouts", type=int, default=20)
+    parser.add_argument("--num-test-rollouts", type=int)
     parser.add_argument("--grad-accumulation-steps", type=int, default=1)
     parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--eval-checkpoint-steps", type=int, default=100)
