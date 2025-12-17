@@ -14,7 +14,7 @@ class Span(NamedTuple):
 
 
 class TokenSequence(NamedTuple):
-    token_ids: torch.IntTensor
+    token_ids: torch.LongTensor
     completions: list[Span]
     base64_images: list[str]
 
@@ -76,7 +76,7 @@ def _load_rollout(rollout_path: str):
 
     sequences: list[TokenSequence] = []
     for completion in rollout["completions"]:
-        token_ids = torch.IntTensor(completion["prompt_token_ids"] + completion["generated_token_ids"])
+        token_ids = torch.LongTensor(completion["prompt_token_ids"] + completion["generated_token_ids"])
         base64_images = [
             message_block["image_url"]["url"]
             for message_idx in completion["prompt_messages"]
