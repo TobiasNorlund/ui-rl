@@ -1,10 +1,12 @@
+import json
 from pathlib import Path
 import torch
-from torch.utils.data import DataLoader, Sampler, random_split
+from copy import deepcopy
+from torch.utils.data import DataLoader, Sampler, IterableDataset
 from accelerate import Accelerator
-from typing import Any, List, Optional
-from collections import defaultdict, namedtuple
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, AutoTokenizer
+from typing import Any
+from collections import defaultdict
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, Qwen2_5_VLProcessor
 from peft import LoraConfig, get_peft_model, PeftModel
 from tqdm import tqdm
 from scipy.special import softmax
@@ -21,9 +23,9 @@ def main(
     rollouts: str,
     num_test_rollouts: int,
     grad_accumulation_steps: int = 1, 
-    output_dir: Optional[str] = None, 
+    output_dir: str | None = None, 
     eval_checkpoint_steps: int = 100, 
-    lora_adapter_path: Optional[str] = None,
+    lora_adapter_path: str | None = None,
     model_name: str = "ByteDance-Seed/UI-TARS-1.5-7B",
     task_error_rates: dict | None = None,
     sampler_temperature: float = 1.0,
@@ -214,6 +216,7 @@ class ErrorBasedTaskUpsampler(Sampler):
             row = random.choices(population=all_tasks, weights=weights, k=1)[0]
             # Sample index for that row uniformly
             yield random.choice(self._task_indices[row])
+
 
 
 if __name__ == "__main__":

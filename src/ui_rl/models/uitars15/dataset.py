@@ -1,4 +1,3 @@
-from collections import defaultdict
 from typing import NamedTuple
 import json
 import torch
@@ -6,6 +5,7 @@ from PIL import Image
 import io
 import base64
 from torch.utils.data import Dataset
+from transformers import Qwen2_5_VLProcessor
 
 
 class Span(NamedTuple):
@@ -30,7 +30,7 @@ class UITARS15_SFTDataset(Dataset):
     Dataset for SFT training UITARS 1.5 on trajectory/rollout data
     """
 
-    def __init__(self, processor, rollout_paths: list[str]):
+    def __init__(self, processor: Qwen2_5_VLProcessor, rollout_paths: list[str]):
         self._processor = processor
         self._sequences: list[TokenSequence] = []
         self.seqidx2rollout: dict[int, Rollout] = {}  # Mapping from seq idx back to its rollout
@@ -70,7 +70,7 @@ class UITARS15_SFTDataset(Dataset):
         }
 
 
-def _load_rollout(rollout_path: str):
+def _load_rollout(rollout_path: str) -> Rollout:
     with open(rollout_path) as f:
         rollout = json.load(f)
 
@@ -93,7 +93,7 @@ def _load_rollout(rollout_path: str):
         ))
     
     for seq in sequences:
-        # Find the longest sequence that starts with seq.token_ids
+        # Find the longest sequence that starts with seq's token_ids
         longest_seq = max(
             (s for s in sequences if len(s.token_ids) >= len(seq.token_ids) and (s.token_ids[:len(seq.token_ids)] == seq.token_ids).all()),
             key=lambda s: len(s.token_ids)
