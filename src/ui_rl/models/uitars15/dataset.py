@@ -62,10 +62,24 @@ class UITARS15_SFTDataset(Dataset):
         for completion in seq.completions:
             labels[0, completion.start:completion.end] = input_ids[0, completion.start:completion.end]
 
+        # TODO: Temp, just using the first row here for now
+        rollout = self.seqidx2rollout[idx]
+        target_row = rollout.task_spec["rows"][0]
+        maybe_submitted_rows = rollout.progress["submitted_row_indices"]
+        if len(maybe_submitted_rows) > 0:
+            submitted_row = maybe_submitted_rows[0]
+        else:
+            submitted_row = -1
+
+        # TODO: Maybe change this row index order logic later
+        successful = target_row - 2 == submitted_row
+        reward = 1.0 if successful else -1.0
+
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "labels": labels,
+            "reward": reward,
             **image_inputs
         }
 
