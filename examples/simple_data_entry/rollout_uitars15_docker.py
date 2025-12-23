@@ -114,18 +114,19 @@ def rows_submitted_correctly(result: RolloutResult) -> bool:
 
 def parse_strategy(strategy: str) -> RolloutStrategy:
     def _get_ids(ids: str):
-        all_ids = set[int]()
+        all_ids = list[int]()
         for id_group in ids.split(","):
             if "-" in id_group:
                 start, stop = id_group.split("-")
-                all_ids.update(range(int(start), int(stop)+1))
+                all_ids += list(range(int(start), int(stop)+1))
             else:
-                all_ids.add(int(id_group))
+                all_ids.append(int(id_group))
         return all_ids
 
     match strategy:
         case s if (m := re.match(r"fixed\((?P<ids>\S+)\)", s)):
             ids = _get_ids(m.group("ids"))
+
             return FixedStrategy(tasks=[
                 SimpleDataEntryTaskSpec(rows=[id])
                 for id in ids

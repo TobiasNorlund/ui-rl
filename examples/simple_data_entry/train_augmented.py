@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import random
 from typing import NamedTuple
-from accelerate import Accelerator
+from accelerate import Accelerator, DataLoaderConfiguration
 from peft import LoraConfig, PeftModel, get_peft_model
 import torch
 from torch.utils.data import DataLoader, IterableDataset
@@ -16,23 +16,35 @@ import wandb
 from train import evaluate
 
 
+def collate_fn(batch):
+    # Assumes batch_size=1 and that all tensors has batch dim already
+    return batch[0]
+
 def main(
     rollouts: str,
-    grad_accumulation_steps: int = 1, 
-    output_dir: str | None = None, 
-    eval_checkpoint_steps: int = 100, 
+    grad_accumulation_steps: int = 1,
+    output_dir: str | None = None,
+    eval_checkpoint_steps: int = 100,
     lora_adapter_path: str | None = None,
     model_name: str = "ByteDance-Seed/UI-TARS-1.5-7B",
 ):
     with open(rollouts) as f:
         rollout_paths = [path.strip() for path in f]
-    
-    processor = AutoProcessor.from_pretrained(model_name)
-    train_ds = AugmentedSFTDataset(processor, rollout_paths, random_seed=42)
-    test_ds = AugmentedSFTDataset(processor, rollout_paths, random_seed=1337)
 
-    train_dataloader = DataLoader(train_ds, batch_size=1, num_workers=2)
-    test_dataloader = DataLoader(test_ds, batch_size=1, num_workers=2)
+    # Initialize accelerator first to get process rank
+    accelerator = Accelerator(
+        gradient_accumulation_steps=grad_accumulation_steps,
+        dataloader_config=DataLoaderConfiguration(dispatch_batches=False)
+        # Need dispatch_batches=False as "pixel_values" and "image_grid_thw" lacks batch dim
+    )
+
+    # Create datasets with rank-aware random seeds
+    processor = AutoProcessor.from_pretrained(model_name)
+    train_ds = AugmentedSFTDataset(processor, rollout_paths, random_seed=42, rank=accelerator.process_index, epoch_size=10000)
+    test_ds = AugmentedSFTDataset(processor, rollout_paths, random_seed=1337, rank=accelerator.process_index, epoch_size=10)
+
+    train_dataloader = DataLoader(train_ds, batch_size=1, collate_fn=collate_fn, num_workers=1)
+    test_dataloader = DataLoader(test_ds, batch_size=1, collate_fn=collate_fn, num_workers=1)
 
     # Load model
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
@@ -63,7 +75,6 @@ def main(
 
     lr = 1e-4
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    accelerator = Accelerator(gradient_accumulation_steps=grad_accumulation_steps)
     model, optimizer, train_dataloader, test_dataloader = accelerator.prepare(model, optimizer, train_dataloader, test_dataloader)
 
     # Resolve default checkpoint directory (datetime-stamped) and ensure it exists
@@ -136,78 +147,90 @@ class Span(NamedTuple):
 
 class AugmentedSFTDataset(IterableDataset):
     """
-    Assumes a rollout dict where each assistant message's "text" block is not str, 
+    Assumes a rollout dict where each assistant message's "text" block is not str,
     but a list[str] of alternative completions.
 
-    This transform selects from the alternatives a random completion, and computes 
+    This transform selects from the alternatives a random completion, and computes
     "prompt_token_ids" and "generated_token_ids" for it
     """
 
-    def __init__(self, processor: Qwen2_5_VLProcessor, rollout_paths: list[str], random_seed: int=0):
+    def __init__(self, processor: Qwen2_5_VLProcessor, rollout_paths: list[str], random_seed: int, rank: int, epoch_size: int):
         self._processor = processor
-        self._rng = random.Random(random_seed)
+        self._base_seed = random_seed
+        self._rank = rank
+        self._epoch_size = epoch_size
         self._rollouts = []
         for rollout_path in rollout_paths:
             with open(rollout_path) as f:
                 self._rollouts.append(json.load(f))
-        
+
     def __iter__(self):
-        # 1. Sample a rollout
-        rollout = self._rng.choice(self._rollouts)
+        # Initialize RNG with seed that depends on rank AND worker ID
+        worker_info = torch.utils.data.get_worker_info()
+        worker_id = worker_info.id if worker_info is not None else 0
+        effective_seed = self._base_seed + self._rank * 100000 + worker_id * 1000
+        rng = random.Random(effective_seed)
 
-        # 2. Sample a sequence in that rollout
-        seqs = defaultdict(list)  # Map sequence (message indices) to list of completion messages
-        for completion in rollout["completions"]:
-            longest = max(
-                (tuple(c["prompt_messages"] + [c["generated_message"]]) for c in rollout["completions"] if c["prompt_messages"][:len(completion["prompt_messages"])] == completion["prompt_messages"]),
-                key=lambda x: len(x)
+        for _ in range(self._epoch_size):
+            # 1. Sample a rollout
+            rollout = rng.choice(self._rollouts)
+
+            # 2. Sample a sequence in that rollout
+            seqs = defaultdict(list)  # Map sequence (message indices) to list of completion messages
+            for completion in rollout["completions"]:
+                longest = max(
+                    (tuple(c["prompt_messages"] + [c["generated_message"]]) for c in rollout["completions"] if c["prompt_messages"][:len(completion["prompt_messages"])] == completion["prompt_messages"]),
+                    key=lambda x: len(x)
+                )
+                seqs[longest].append(longest.index(completion["generated_message"]))
+            seq, completion_indices = rng.choice(list(seqs.items()))
+
+            # 3. In that sequence, sample each completion
+            messages = []
+            for message_index in seq:
+                message = deepcopy(rollout["messages"][message_index])
+                for block in message["content"]:
+                    # Convert "image_url" -> "image"
+                    if block["type"] == "image_url":
+                        block["type"] = "image"
+                        block["image"] = block["image_url"]["url"]
+                        del block["image_url"]
+                    # Sample completion
+                    if block["type"] == "text" and isinstance(block["text"], list):
+                        block["text"] = rng.choice(block["text"])
+                messages.append(message)
+
+            # 4. Run through processor
+            inputs = self._processor.apply_chat_template(
+                messages,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
             )
-            seqs[longest].append({
-                "message_idx": longest.index(completion["completion"]),
-            })
-        seq, completion_messages = self._rng.choice(list(seqs.items()))
 
-        # 3. In that sequence, sample each completion
-        messages = []
-        for i in seq:
-            message = deepcopy(rollout["messages"][i])
-            if i in completion_messages:
-                assert message["content"][0]["type"] == "text" and isinstance(message["content"][0]["text"], list)
-                message["content"][0]["text"] = self._rng.choice(message["content"][0]["text"])
+            # 5. Compute labels
+            # Mask labels to only train on completed message tokens
+            # Find message spans and match to "completion" messages, i.e the messages we want to train on
+            spans = self._find_message_spans(inputs["input_ids"][0].tolist())
+            assistant_token_id = 77091
+            labels = torch.zeros_like(inputs["input_ids"]).fill_(-100)
+            message_prefix_len = 3  # Each message starts with three tokens that we don't wanna train on
+            for completion in completion_indices:
+                span = spans[completion + 1] # +1 because jinja adds a system message when rendering
+                assert span.role_id == assistant_token_id, "Should only complete assistant messages. Something is wrong"
+                
+                # Modify the span to exactly match the tokens we want to train on
+                start = span.start + message_prefix_len
+                end = span.end + 1  # Include the end-of-message token
+                labels[0, start:end] = inputs["input_ids"][0, start:end]
 
-        # 4. Run through processor
-        inputs = self._processor.apply_chat_template(
-            messages,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        )
-
-        # 5. Compute labels
-        # Mask labels to only train on completed message tokens
-        # Find message spans and match to "completion" messages, i.e the messages we want to train on
-        spans = self._find_message_spans(inputs["input_ids"][0].tolist())
-        assistant_token_id = 77091
-        labels = torch.zeros_like(inputs["input_ids"]).fill_(-100)
-        message_prefix_len = 3  # Each message starts with three tokens that we don't wanna train on
-        for completion in completion_messages:
-            span = spans[completion["message_idx"] + 1] # +1 because jinja adds a system message when rendering
-            assert span.role_id == assistant_token_id, "Should only complete assistant messages. Something is wrong"
-            
-            # Modify the span to exactly match the tokens we want to train on
-            start = span.start + message_prefix_len
-            end = span.end + 1  # Include the end-of-message token
-            # assert len(completion["logprobs"]) == end - start, "Tokenized seq doesn't match reference seq"
-            completion["span"] = (start, end)
-            labels[0, start:end] = inputs["input_ids"][0, start:end]
-
-        return {
-            "input_ids": inputs["input_ids"],
-            "attention_mask": inputs["attention_mask"],
-            "pixel_values": inputs["pixel_values"],
-            "image_grid_thw": inputs["image_grid_thw"],
-            "labels": labels,
-        }
+            yield {
+                "input_ids": inputs["input_ids"],
+                "attention_mask": inputs["attention_mask"],
+                "pixel_values": inputs["pixel_values"],
+                "image_grid_thw": inputs["image_grid_thw"],
+                "labels": labels,
+            }
 
     @staticmethod
     def _find_message_spans(input_ids: list) -> list[Span]:
@@ -226,3 +249,17 @@ class AugmentedSFTDataset(IterableDataset):
                 spans.append(Span(start, i, role_id))
                 start, role_id = None, None
         return spans
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--rollouts", required=True)
+    parser.add_argument("--grad-accumulation-steps", type=int, default=1)
+    parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--eval-checkpoint-steps", type=int, default=100)
+    parser.add_argument("--lora-adapter-path", type=str, default=None, help="Path to existing LoRA adapter to continue training from")
+    parser.add_argument("--model-name", type=str, default="ByteDance-Seed/UI-TARS-1.5-7B")
+    args = parser.parse_args()
+
+    main(**vars(args))
