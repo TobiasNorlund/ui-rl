@@ -89,7 +89,8 @@ class UITARS15_Rollout:
         })
 
         # Get messages to predict next action
-        prompt_messages = self._get_prompt_messages()
+        prompt_message_indices = self._get_prompt_message_indices()
+        prompt_messages = [self._messages[i] for i in prompt_message_indices]
         response = self._request_completion(
             model=self._model_name,
             messages=prompt_messages,
@@ -103,12 +104,16 @@ class UITARS15_Rollout:
 
         completion_message: dict = response["choices"][0]["message"]
 
+        # Remove empty kv pairs (function/tool_call, reasoning_content etc)
+        completion_message = {k: v for k, v in completion_message.items() if v}
+
         completion = Completion(
             prompt_token_ids=response["prompt_token_ids"],
             prompt_messages=prompt_messages,
+            prompt_message_indices=prompt_message_indices,
             generated_token_ids=response["choices"][0]["token_ids"],
             generated_message=completion_message,
-
+            generated_message_index=len(self._messages)  # it will have this index once added below
         )
 
         self._messages.append(completion_message)
@@ -122,20 +127,20 @@ class UITARS15_Rollout:
 
         return parse_action(action_str)
 
-    def _get_prompt_messages(self):
-        messages = []
-        messages.append(self._messages[0]) # Add prompt message
+    def _get_prompt_message_indices(self) -> List[int]:
+        message_indices = []
+        message_indices.append(0) # Add prompt message index
 
         # Add as much as possible of the message context, but cap at _max_images_in_context
         image_messages = [i for i, m in enumerate(self._messages) if "content" in m and isinstance(m["content"], list) and any(c.get("type") == "image_url" for c in m["content"])]
         if len(image_messages) <= self._max_images_in_context:
             # Include all context
-            messages += self._messages[1:]
+            message_indices += list(range(1, len(self._messages)))
         else:
             # Cap to include at most _max_images_in_context
             cap_idx = image_messages[-self._max_images_in_context]
-            messages += self._messages[cap_idx:]
-        return messages
+            message_indices += list(range(cap_idx, len(self._messages)))
+        return message_indices
 
     def _request_completion(self, **kwargs):
         for attempt in range(3):
@@ -165,10 +170,11 @@ class UITARS15_Rollout:
             "messages": self._messages,
             "completions": [
                 {
+                    # Only save message indices, referencing "messages" above
                     "prompt_token_ids": completion.prompt_token_ids,
-                    "prompt_messages": [self._messages.index(m) for m in completion.prompt_messages],
+                    "prompt_messages": completion.prompt_message_indices,
                     "generated_token_ids": completion.generated_token_ids,
-                    "generated_message": self._messages.index(completion.generated_message),
+                    "generated_message": completion.generated_message_index,
                 }
                 for completion in self._completions
             ],
@@ -183,8 +189,10 @@ class UITARS15_Rollout:
 class Completion:
     prompt_token_ids: List[int]
     prompt_messages: List[Dict]
+    prompt_message_indices: List[int]
     generated_token_ids: List[int]
     generated_message: Dict
+    generated_message_index: int
 
 
 def parse_response_string(response_string: str):
@@ -249,7 +257,9 @@ def parse_action(action_str: str) -> Action | None:
         match = re.search(r"hotkey\(key='([^']+)'\)", action_str)
         if match:
             key = match.group(1)
-            return Action(action_type=ActionType.Keys, keys=key.replace(" ", "+"))
+            # Replace spaces with + and collapse multiple + into single +
+            normalized_key = re.sub(r'\++', '+', key.replace(" ", "+"))
+            return Action(action_type=ActionType.Keys, keys=normalized_key)
         else:
             raise ValueError(f"Couldn't parse action: {action_str}")
 
