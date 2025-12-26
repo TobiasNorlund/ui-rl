@@ -3,34 +3,23 @@
 `ui-rl` is a library for fine-tuning of Computer Use agent models.
 It allows training on verifiable UI tasks to improve model reliability on targeted domains and tasks.
 
-## How to run
-
-Tested on a machine with one A100/H100 80GB
+## Example: Generate rollouts for Simple Data Entry task
 
 ```bash
-# 1. Setup kubctl to connect
-gcloud container clusters get-credentials simple-data-entry-cluster --region=europe-north2
- 
-# 2. Make sure the ui-verifiers proxy server is deployed
-(cd /path/to/ui-verifiers/proxy; make deploy)
+cd examples/simple_data_entry
 
-# 3. Find out public/external IP of proxy server (might need to wait a minute or so)
-kubectl get services
+# 1. Build Simple Data Entry docker image
+(cd env && make build)
 
-# 4. Start vLLM model host
-VLLM_HTTP_TIMEOUT_KEEP_ALIVE=30 uv run vllm serve ByteDance-Seed/UI-TARS-1.5-7B --limit-mm-per-prompt '{"image":10, "video":0}' --max-num-seqs 8 --data-parallel-size 8 \
-    --enable-lora --max-lora-rank 64 --lora-modules step_15000=data/checkpoints/20251210_195352/step_15000
-    
-#`find data/checkpoints/20251210_195352/ -mindepth 1 -maxdepth 1 -type d -printf "%f=%p "`
+# 2. Start vLLM model host on all available GPUs (optionally with lora checkpoint preloaded)
+uv run launch_vllm.py --limit-mm-per-prompt '{"image":10, "video":0}' --max-num-seqs 8 \
+    --extra-mount "~/ui-rl/data/checkpoints:/app/models" --enable-lora --max-lora-rank 64 --lora-modules step_2000=/app/models/20251210_195352/step_2000
 
-# 5. Generate a batch of rollouts
-#CLUSTER_HOST=`kubectl get service proxy-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`
-#MODEL_HOST=localhost
-#uv run ui_rl/rollout/generate_rollout_batch.py --cluster-host $CLUSTER_HOST:8000 --vllm-host $MODEL_HOST:8000 --strategy "nsuccess(2-101;1;100)" --model-name step_10000 --max-parallel 15
+# 3. In another terminal, start generating rollouts with
+uv run rollout_uitars15_docker.py --vllm-host localhost:8000 --strategy "nsuccessful(2-101;1;15;100)" --model-name step_2000 --max-parallel 120
+```
 
-uv run rollout_uitars15_docker.py --vllm-host localhost:8000 --strategy "nsuccess(2-101;1;15;100)" --model-name step_15000 --max-parallel 120
-uv run rollout_uitars15_docker.py --vllm-host localhost:8000 --model-name ByteDance-Seed/UI-TARS-1.5-7B --strategy "ncorrect(2-101;1;1;15)" --max-parallel 15
-
+## Example: Fine-tune model on successful rollouts (e.g. Rejection Sampling)
 # 7. Run SFT on the successful rollouts (=rejection sampling)
 uv run ui_rl/train.py \
     --rollouts `find data/rollouts/20251128_132027/ -name "*_success.json"` \
