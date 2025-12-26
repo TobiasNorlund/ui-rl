@@ -89,11 +89,11 @@ def main(rollout: str, n: int, output :str):
         print("---")
         print()
 
+    for completion, variations in zip(rollout["completions"], variants):
         # Replace original content
         rollout["messages"][completion["generated_message"]]["content"] = [
             {"type": "text", "text": [orig] + variations}
         ]
-
         # Remove token ids from completion
         del completion["prompt_token_ids"]
         del completion["generated_token_ids"]

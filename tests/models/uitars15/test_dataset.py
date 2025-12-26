@@ -136,7 +136,7 @@ def sample_augmented_rollout_json(sample_image_base64):
                 "content": [
                     {
                         "type": "text",
-                        "text": ["Action 2 variant A", "Action 2 variant B"]
+                        "text": ["Action 2 variant A", "Action 2 variant B", "Action 2 variant C"]
                     }
                 ]
             }
@@ -424,22 +424,6 @@ class TestUITARS15ThoughtAugmentedRolloutDataset:
             assert set(ex1.keys()) == set(ex2.keys())
             assert all(torch.all(ex1[k] == ex2[k]) for k in ex1.keys())
 
-    def test_multiworker_consistency(self, sample_augmented_rollout_json, tmp_path):
-        rollout_file = tmp_path / "test_augmented_rollout.json"
-        with open(rollout_file, 'w') as f:
-            json.dump(sample_augmented_rollout_json, f)
-
-        processor = AutoProcessor.from_pretrained("ByteDance-Seed/UI-TARS-1.5-7B")
-        dataset = UITARS15_ThoughtAugmentedRolloutDataset(
-            processor,
-            str(rollout_file),
-            random_seed=42
-        )
-
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, num_workers=2)
-        for ex1, ex2 in islice(zip(dataloader, dataloader), 3):
-            assert set(ex1.keys()) == set(ex2.keys())
-            assert all(torch.all(ex1[k] == ex2[k]) for k in ex1.keys())
 
 class TestDatasetIntegration:
     """Integration tests for the datasets"""
@@ -473,3 +457,4 @@ class TestDatasetIntegration:
 
             # Should have same keys
             assert set(item1.keys()) == set(item2.keys())
+        

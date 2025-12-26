@@ -47,7 +47,7 @@ class UITARS15_RolloutDataset(Dataset):
     def __getitem__(self, idx: int):
         seq = self._sequences[idx]
 
-        input_ids = seq.token_ids[None, ...]
+        input_ids = seq.token_ids
         attention_mask = torch.ones_like(input_ids)
 
         # Decode base64 images to PIL and use processor to obtain image inputs
@@ -60,7 +60,7 @@ class UITARS15_RolloutDataset(Dataset):
         # Construct labels to only train on completed message tokens
         labels = torch.zeros_like(input_ids).fill_(-100)
         for completion in seq.completions:
-            labels[0, completion.start:completion.end] = input_ids[0, completion.start:completion.end]
+            labels[completion.start:completion.end] = input_ids[completion.start:completion.end]
 
         return {
             "input_ids": input_ids,
@@ -126,7 +126,7 @@ class UITARS15_ThoughtAugmentedRolloutDataset(IterableDataset):
 
     def __init__(self, processor: Qwen2_5_VLProcessor, rollout_path: str, random_seed: int = 0):
         self._processor = processor
-        self._random_seed = random_seed 
+        self._random_seed = random_seed
         with open(rollout_path) as f:
             self._rollout = json.load(f)
         
@@ -148,7 +148,7 @@ class UITARS15_ThoughtAugmentedRolloutDataset(IterableDataset):
             # Sample a sequence
             seq, completion_messages = rng.choice(list(self._sequences.items()))
 
-            # 3. In that sequence, sample each completion
+            # In that sequence, sample each completion
             messages = []
             for message_index in seq:
                 message = deepcopy(self._rollout["messages"][message_index])
@@ -163,7 +163,7 @@ class UITARS15_ThoughtAugmentedRolloutDataset(IterableDataset):
                         block["text"] = rng.choice(block["text"])
                 messages.append(message)
 
-            # 4. Run through processor
+            # Run through processor
             inputs = self._processor.apply_chat_template(
                 messages,
                 tokenize=True,
@@ -171,9 +171,9 @@ class UITARS15_ThoughtAugmentedRolloutDataset(IterableDataset):
                 return_tensors="pt",
             )
 
-            # 5. Compute labels
-            # Mask labels to only train on completed message tokens
-            # Find message spans and match to "completion" messages, i.e the messages we want to train on
+            # Compute labels
+            #  Train only on completed message tokens
+            #  Find message spans and match to "completion" messages, i.e the messages we want to train on
             spans = self._find_message_spans(inputs["input_ids"][0].tolist())
             assistant_token_id = 77091
             labels = torch.zeros_like(inputs["input_ids"]).fill_(-100)
@@ -188,16 +188,16 @@ class UITARS15_ThoughtAugmentedRolloutDataset(IterableDataset):
                 labels[0, start:end] = inputs["input_ids"][0, start:end]
 
             yield {
-                "input_ids": inputs["input_ids"],
-                "attention_mask": inputs["attention_mask"],
-                "pixel_values": inputs["pixel_values"],
-                "image_grid_thw": inputs["image_grid_thw"],
-                "labels": labels,
+                "input_ids": inputs["input_ids"][0],
+                "attention_mask": inputs["attention_mask"][0],
+                "pixel_values": inputs["pixel_values"][0],
+                "image_grid_thw": inputs["image_grid_thw"][0],
+                "labels": labels[0],
             }
 
     @classmethod
     def _find_message_spans(cls, input_ids: list) -> list[Span]:
-        # Note: UITARS specific
+        # Note: Specific to Qwen 2.5 VL
         message_start_id = 151644
         message_end_id = 151645
         # Scan tokens to find message spans
