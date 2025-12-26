@@ -70,7 +70,7 @@ class SimpleDataEntryRolloutWorker(RolloutWorker):
         # Initialize docker runtime for this worker
         cls._runtime = DockerSessionRuntime(httpx_client=cls._httpx_client, session_timeout=60)
 
-    def run(self, rollout_id: int, task_spec: TaskSpec):
+    def run(self, rollout_id: int, task_spec: SimpleDataEntryTaskSpec):
         rollout = UITARS15_Rollout(
             task_spec=task_spec,
             model_host=self._model_host,
@@ -92,13 +92,13 @@ class SimpleDataEntryRolloutWorker(RolloutWorker):
 
             # Save rollout
             result = RolloutResult(rollout_id, task_spec, rollout.progress, None)
-            file_name = f"rollout_{rollout_id:04d}_success.json" if rows_submitted_correctly(result) else f"rollout_{rollout_id:04d}_fail.json"
+            file_name = f"row_{task_spec.rows[0]:03d}_success_{rollout_id:04d}.json" if rows_submitted_correctly(result) else f"row_{task_spec.rows[0]:03d}_fail_{rollout_id:04d}.json"
             rollout.save(output_dir / file_name)
             return result
 
         except Exception as e:
             logging.error(f"Rollout {rollout_id} was stopped due to an error: {e}")
-            return RolloutResult(rollout_id, task_spec, rollout.progress, e) 
+            return RolloutResult(rollout_id, task_spec, rollout.progress, e)
 
 
 def rows_submitted_correctly(result: RolloutResult) -> bool:
