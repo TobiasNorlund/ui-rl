@@ -106,7 +106,7 @@ def main(config_file: str):
 
     # Initialize Weights & Biases
     if accelerator.is_main_process:
-        wandb.init(project="ui-rl")
+        wandb.init(project="ui-rl", config={"config": config_file})
         wandb.save(config_file)
 
     accelerator.wait_for_everyone()

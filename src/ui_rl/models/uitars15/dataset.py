@@ -190,8 +190,8 @@ class UITARS15_ThoughtAugmentedRolloutDataset(IterableDataset):
             yield {
                 "input_ids": inputs["input_ids"][0],
                 "attention_mask": inputs["attention_mask"][0],
-                "pixel_values": inputs["pixel_values"][0],
-                "image_grid_thw": inputs["image_grid_thw"][0],
+                "pixel_values": inputs["pixel_values"],
+                "image_grid_thw": inputs["image_grid_thw"],
                 "labels": labels[0],
             }
 
