@@ -36,7 +36,7 @@ def main(
     # Disable verbose logging from httpx
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    logging.info(f"Starting generation of rollouts, using {max_parallel} parallel workers")
+    logging.info(f"Starting generation of rollouts from model '{model_name}', using {max_parallel} parallel workers")
     logging.info(f"Logs will be saved to: {output_dir}")
 
     wandb.init(project="ui-rl", config={

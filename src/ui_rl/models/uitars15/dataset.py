@@ -1,7 +1,7 @@
 from collections import defaultdict
 from copy import deepcopy
 import random
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 import json
 import torch
 from PIL import Image
@@ -30,12 +30,13 @@ class UITARS15_RolloutDataset(Dataset):
         progress: dict
         sequences: list["UITARS15_RolloutDataset.TokenSequence"]
 
-    def __init__(self, processor: Qwen2_5_VLProcessor, rollout_path: str):
+    def __init__(self, processor: Qwen2_5_VLProcessor, rollout_path: str, reward_fn: Callable[[Rollout], float] | None = None):
         self._processor = processor
         
         rollout = self._load_rollout(rollout_path)
         self._sequences = rollout.sequences
         self._task_spec = rollout.task_spec
+        self._reward = reward_fn(rollout) if reward_fn is not None else 0.0
             
     def __len__(self):
         return len(self._sequences)
@@ -66,6 +67,7 @@ class UITARS15_RolloutDataset(Dataset):
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "labels": labels,
+            "reward": torch.tensor(self._reward, dtype=torch.float32)
             **image_inputs
         }
 
