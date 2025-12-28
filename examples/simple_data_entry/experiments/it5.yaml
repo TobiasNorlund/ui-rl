@@ -1,0 +1,938 @@
+model_name: "ByteDance-Seed/UI-TARS-1.5-7B"
+lora_adapter_path: "../../data/checkpoints/20251210_195352/step_2000"
+learning_rate: 1e-4
+eval_checkpoint_steps: 1000
+accelerate_kwargs:
+  gradient_accumulation_steps: 8
+
+# Sampling weights using:
+# uv run update_train_config_sampling_weights.py --temperature 0.4 experiments/it5.yaml ../../data/rollouts/20251226_170149/row_*.json > /tmp/it5.yaml && mv /tmp/it5.yaml experiments/it5.yaml 
+
+train_rollouts:
+- name: row_002
+  sampling_weight: 0.002457808788332193
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_002_success_0003.json
+  - ../../data/rollouts/20251226_170149/row_002_success_0004.json
+  - ../../data/rollouts/20251226_170149/row_002_success_0007.json
+  - ../../data/rollouts/20251226_170149/row_002_success_0008.json
+  - ../../data/rollouts/20251226_170149/row_002_success_0009.json
+  - ../../data/rollouts/20251226_170149/row_002_success_0010.json
+  - ../../data/rollouts/20251226_170149/row_002_success_0011.json
+  - ../../data/rollouts/20251226_170149/row_002_success_0012.json
+  - ../../data/rollouts/20251226_170149/row_002_success_0013.json
+  - ../../data/rollouts/20251226_170149/row_002_success_0014.json
+  - ../../data/rollouts/20251226_170149/row_002_success_0015.json
+
+- name: row_003
+  sampling_weight: 0.0056001849742810614
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_003_success_0016.json
+  - ../../data/rollouts/20251226_170149/row_003_success_0019.json
+  - ../../data/rollouts/20251226_170149/row_003_success_0021.json
+  - ../../data/rollouts/20251226_170149/row_003_success_0022.json
+  - ../../data/rollouts/20251226_170149/row_003_success_0023.json
+  - ../../data/rollouts/20251226_170149/row_003_success_0024.json
+  - ../../data/rollouts/20251226_170149/row_003_success_0025.json
+  - ../../data/rollouts/20251226_170149/row_003_success_0030.json
+
+- name: row_004
+  sampling_weight: 0.010419871049877266
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_004_success_0032.json
+  - ../../data/rollouts/20251226_170149/row_004_success_0034.json
+  - ../../data/rollouts/20251226_170149/row_004_success_0037.json
+  - ../../data/rollouts/20251226_170149/row_004_success_0042.json
+
+- name: row_005
+  sampling_weight: 0.006083135173146199
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_005_success_0046.json
+  - ../../data/rollouts/20251226_170149/row_005_success_0048.json
+  - ../../data/rollouts/20251226_170149/row_005_success_0049.json
+  - ../../data/rollouts/20251226_170149/row_005_success_0051.json
+  - ../../data/rollouts/20251226_170149/row_005_success_0052.json
+  - ../../data/rollouts/20251226_170149/row_005_success_0056.json
+  - ../../data/rollouts/20251226_170149/row_005_success_0060.json
+
+- name: row_006
+  sampling_weight: 0.005655358766376882
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_006_success_0063.json
+  - ../../data/rollouts/20251226_170149/row_006_success_0067.json
+  - ../../data/rollouts/20251226_170149/row_006_success_0068.json
+  - ../../data/rollouts/20251226_170149/row_006_success_0071.json
+  - ../../data/rollouts/20251226_170149/row_006_success_0073.json
+  - ../../data/rollouts/20251226_170149/row_006_success_0075.json
+
+- name: row_007
+  sampling_weight: 0.006681016967150342
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_007_success_0076.json
+  - ../../data/rollouts/20251226_170149/row_007_success_0077.json
+  - ../../data/rollouts/20251226_170149/row_007_success_0078.json
+  - ../../data/rollouts/20251226_170149/row_007_success_0080.json
+  - ../../data/rollouts/20251226_170149/row_007_success_0084.json
+  - ../../data/rollouts/20251226_170149/row_007_success_0086.json
+
+- name: row_008
+  sampling_weight: 0.01008485630014801
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_008_success_0091.json
+  - ../../data/rollouts/20251226_170149/row_008_success_0092.json
+  - ../../data/rollouts/20251226_170149/row_008_success_0103.json
+  - ../../data/rollouts/20251226_170149/row_008_success_0104.json
+
+- name: row_009
+  sampling_weight: 0.016554825394685137
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_009_success_0117.json
+
+- name: row_010
+  sampling_weight: 0.008705683592929893
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_010_success_0134.json
+  - ../../data/rollouts/20251226_170149/row_010_success_0136.json
+  - ../../data/rollouts/20251226_170149/row_010_success_0141.json
+  - ../../data/rollouts/20251226_170149/row_010_success_0145.json
+
+- name: row_011
+  sampling_weight: 0.011527376390223427
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_011_success_0155.json
+  - ../../data/rollouts/20251226_170149/row_011_success_0257.json
+  - ../../data/rollouts/20251226_170149/row_011_success_0258.json
+  - ../../data/rollouts/20251226_170149/row_011_success_0261.json
+
+- name: row_012
+  sampling_weight: 0.01592183231862167
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_012_success_0165.json
+  - ../../data/rollouts/20251219_augmented/row_012.augmented.json
+
+- name: row_013
+  sampling_weight: 0.009720822328122285
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_013_success_0185.json
+  - ../../data/rollouts/20251226_170149/row_013_success_0281.json
+  - ../../data/rollouts/20251226_170149/row_013_success_0286.json
+  - ../../data/rollouts/20251226_170149/row_013_success_0293.json
+  - ../../data/rollouts/20251226_170149/row_013_success_0295.json
+
+- name: row_014
+  sampling_weight: 0.008705683592929893
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_014_success_0211.json
+  - ../../data/rollouts/20251226_170149/row_014_success_0214.json
+  - ../../data/rollouts/20251226_170149/row_014_success_0296.json
+  - ../../data/rollouts/20251226_170149/row_014_success_0315.json
+
+- name: row_015
+  sampling_weight: 0.009324110291566
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_015_success_0279.json
+  - ../../data/rollouts/20251226_170149/row_015_success_0314.json
+  - ../../data/rollouts/20251226_170149/row_015_success_0318.json
+  - ../../data/rollouts/20251226_170149/row_015_success_0326.json
+  - ../../data/rollouts/20251226_170149/row_015_success_0331.json
+  - ../../data/rollouts/20251226_170149/row_015_success_0336.json
+  - ../../data/rollouts/20251226_170149/row_015_success_0343.json
+  - ../../data/rollouts/20251226_170149/row_015_success_0352.json
+
+- name: row_016
+  sampling_weight: 0.017505331832538037
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_016_success_0598.json
+  - ../../data/rollouts/20251219_augmented/row_016.augmented.json
+
+- name: row_017
+  sampling_weight: 0.013107482626888116
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_017_success_0270.json
+  - ../../data/rollouts/20251226_170149/row_017_success_0272.json
+  - ../../data/rollouts/20251226_170149/row_017_success_0379.json
+
+- name: row_018
+  sampling_weight: 0.004052241628636996
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_018_success_0276.json
+  - ../../data/rollouts/20251226_170149/row_018_success_0277.json
+  - ../../data/rollouts/20251226_170149/row_018_success_0282.json
+  - ../../data/rollouts/20251226_170149/row_018_success_0283.json
+  - ../../data/rollouts/20251226_170149/row_018_success_0284.json
+  - ../../data/rollouts/20251226_170149/row_018_success_0285.json
+  - ../../data/rollouts/20251226_170149/row_018_success_0292.json
+  - ../../data/rollouts/20251226_170149/row_018_success_0297.json
+
+- name: row_019
+  sampling_weight: 0.0029035580049289324
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_019_success_0298.json
+  - ../../data/rollouts/20251226_170149/row_019_success_0299.json
+  - ../../data/rollouts/20251226_170149/row_019_success_0302.json
+  - ../../data/rollouts/20251226_170149/row_019_success_0303.json
+  - ../../data/rollouts/20251226_170149/row_019_success_0304.json
+  - ../../data/rollouts/20251226_170149/row_019_success_0306.json
+  - ../../data/rollouts/20251226_170149/row_019_success_0307.json
+  - ../../data/rollouts/20251226_170149/row_019_success_0308.json
+  - ../../data/rollouts/20251226_170149/row_019_success_0309.json
+  - ../../data/rollouts/20251226_170149/row_019_success_0311.json
+  - ../../data/rollouts/20251226_170149/row_019_success_0312.json
+
+- name: row_020
+  sampling_weight: 0.008890510769539662
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_020_success_0313.json
+  - ../../data/rollouts/20251226_170149/row_020_success_0316.json
+  - ../../data/rollouts/20251226_170149/row_020_success_0322.json
+  - ../../data/rollouts/20251226_170149/row_020_success_0334.json
+
+- name: row_021
+  sampling_weight: 0.00520318124573003
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_021_success_0335.json
+  - ../../data/rollouts/20251226_170149/row_021_success_0340.json
+  - ../../data/rollouts/20251226_170149/row_021_success_0341.json
+  - ../../data/rollouts/20251226_170149/row_021_success_0342.json
+  - ../../data/rollouts/20251226_170149/row_021_success_0347.json
+  - ../../data/rollouts/20251226_170149/row_021_success_0350.json
+  - ../../data/rollouts/20251226_170149/row_021_success_0360.json
+  - ../../data/rollouts/20251226_170149/row_021_success_0407.json
+
+- name: row_022
+  sampling_weight: 0.01528476259684776
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_022_success_0557.json
+
+- name: row_023
+  sampling_weight: 0.011015134783649232
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_023_success_0404.json
+  - ../../data/rollouts/20251226_170149/row_023_success_0410.json
+  - ../../data/rollouts/20251226_170149/row_023_success_0490.json
+  - ../../data/rollouts/20251226_170149/row_023_success_0495.json
+
+- name: row_024
+  sampling_weight: 0.01414371303044684
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_024_success_0523.json
+  - ../../data/rollouts/20251226_170149/row_024_success_0532.json
+  - ../../data/rollouts/20251226_170149/row_024_success_0567.json
+
+- name: row_025
+  sampling_weight: 0.006681016967150342
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_025_success_0432.json
+  - ../../data/rollouts/20251226_170149/row_025_success_0433.json
+  - ../../data/rollouts/20251226_170149/row_025_success_0435.json
+  - ../../data/rollouts/20251226_170149/row_025_success_0436.json
+  - ../../data/rollouts/20251226_170149/row_025_success_0437.json
+  - ../../data/rollouts/20251226_170149/row_025_success_0438.json
+  - ../../data/rollouts/20251226_170149/row_025_success_0513.json
+  - ../../data/rollouts/20251226_170149/row_025_success_0519.json
+
+- name: row_026
+  sampling_weight: 0.00686920235752845
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_026_success_0445.json
+  - ../../data/rollouts/20251226_170149/row_026_success_0453.json
+  - ../../data/rollouts/20251226_170149/row_026_success_0459.json
+  - ../../data/rollouts/20251226_170149/row_026_success_0461.json
+  - ../../data/rollouts/20251226_170149/row_026_success_0462.json
+  - ../../data/rollouts/20251226_170149/row_026_success_0539.json
+
+- name: row_027
+  sampling_weight: 0.0056001849742810614
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_027_success_0466.json
+  - ../../data/rollouts/20251226_170149/row_027_success_0473.json
+  - ../../data/rollouts/20251226_170149/row_027_success_0474.json
+  - ../../data/rollouts/20251226_170149/row_027_success_0475.json
+  - ../../data/rollouts/20251226_170149/row_027_success_0478.json
+  - ../../data/rollouts/20251226_170149/row_027_success_0480.json
+  - ../../data/rollouts/20251226_170149/row_027_success_0485.json
+  - ../../data/rollouts/20251226_170149/row_027_success_0543.json
+
+- name: row_028
+  sampling_weight: 0.01223784714107615
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_028_success_0486.json
+  - ../../data/rollouts/20251226_170149/row_028_success_0502.json
+  - ../../data/rollouts/20251226_170149/row_028_success_0517.json
+  - ../../data/rollouts/20251219_augmented/row_028.augmented.json
+
+- name: row_029
+  sampling_weight: 0.015975640419974797
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_029_success_0664.json
+  - ../../data/rollouts/20251226_170149/row_029_success_0717.json
+
+- name: row_030
+  sampling_weight: 0.005655358766376882
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_030_success_0560.json
+  - ../../data/rollouts/20251226_170149/row_030_success_0562.json
+  - ../../data/rollouts/20251226_170149/row_030_success_0563.json
+  - ../../data/rollouts/20251226_170149/row_030_success_0565.json
+  - ../../data/rollouts/20251226_170149/row_030_success_0569.json
+  - ../../data/rollouts/20251226_170149/row_030_success_0571.json
+
+- name: row_031
+  sampling_weight: 0.007515122136058243
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_031_success_0578.json
+  - ../../data/rollouts/20251226_170149/row_031_success_0580.json
+  - ../../data/rollouts/20251226_170149/row_031_success_0583.json
+  - ../../data/rollouts/20251226_170149/row_031_success_0588.json
+  - ../../data/rollouts/20251226_170149/row_031_success_0590.json
+  - ../../data/rollouts/20251226_170149/row_031_success_0594.json
+
+- name: row_032
+  sampling_weight: 0.008890510769539662
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_032_success_0610.json
+  - ../../data/rollouts/20251226_170149/row_032_success_0619.json
+  - ../../data/rollouts/20251226_170149/row_032_success_0621.json
+  - ../../data/rollouts/20251226_170149/row_032_success_0708.json
+  - ../../data/rollouts/20251226_170149/row_032_success_0712.json
+  - ../../data/rollouts/20251226_170149/row_032_success_0722.json
+
+- name: row_033
+  sampling_weight: 0.014468841703130666
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_033_success_0632.json
+  - ../../data/rollouts/20251226_170149/row_033_success_0635.json
+
+- name: row_034
+  sampling_weight: 0.013286788777486933
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_034_success_0649.json
+
+- name: row_035
+  sampling_weight: 0.008890510769539662
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_035_success_0689.json
+  - ../../data/rollouts/20251226_170149/row_035_success_0692.json
+  - ../../data/rollouts/20251226_170149/row_035_success_0778.json
+  - ../../data/rollouts/20251226_170149/row_035_success_0779.json
+  - ../../data/rollouts/20251226_170149/row_035_success_0791.json
+  - ../../data/rollouts/20251226_170149/row_035_success_0792.json
+
+- name: row_036
+  sampling_weight: 0.011527376390223427
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_036_success_0694.json
+  - ../../data/rollouts/20251226_170149/row_036_success_0701.json
+  - ../../data/rollouts/20251226_170149/row_036_success_0713.json
+  - ../../data/rollouts/20251226_170149/row_036_success_0815.json
+
+- name: row_037
+  sampling_weight: 0.009720822328122285
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_037_success_0724.json
+  - ../../data/rollouts/20251226_170149/row_037_success_0730.json
+  - ../../data/rollouts/20251226_170149/row_037_success_0734.json
+  - ../../data/rollouts/20251226_170149/row_037_success_0830.json
+  - ../../data/rollouts/20251226_170149/row_037_success_0836.json
+
+- name: row_038
+  sampling_weight: 0.011682520448736692
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_038_success_0744.json
+  - ../../data/rollouts/20251226_170149/row_038_success_0751.json
+
+- name: row_039
+  sampling_weight: 0.003430148483482195
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_039_success_0759.json
+  - ../../data/rollouts/20251226_170149/row_039_success_0760.json
+  - ../../data/rollouts/20251226_170149/row_039_success_0761.json
+  - ../../data/rollouts/20251226_170149/row_039_success_0765.json
+  - ../../data/rollouts/20251226_170149/row_039_success_0767.json
+  - ../../data/rollouts/20251226_170149/row_039_success_0768.json
+  - ../../data/rollouts/20251226_170149/row_039_success_0769.json
+  - ../../data/rollouts/20251226_170149/row_039_success_0774.json
+  - ../../data/rollouts/20251226_170149/row_039_success_0775.json
+  - ../../data/rollouts/20251226_170149/row_039_success_0780.json
+
+- name: row_040
+  sampling_weight: 0.011229014240546745
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_040_success_0787.json
+  - ../../data/rollouts/20251226_170149/row_040_success_0793.json
+  - ../../data/rollouts/20251226_170149/row_040_success_0799.json
+  - ../../data/rollouts/20251226_170149/row_040_success_0892.json
+  - ../../data/rollouts/20251226_170149/row_040_success_0901.json
+
+- name: row_041
+  sampling_weight: 0.008485854929293555
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_041_success_0802.json
+  - ../../data/rollouts/20251226_170149/row_041_success_0813.json
+  - ../../data/rollouts/20251226_170149/row_041_success_0820.json
+  - ../../data/rollouts/20251226_170149/row_041_success_0902.json
+  - ../../data/rollouts/20251226_170149/row_041_success_0903.json
+  - ../../data/rollouts/20251226_170149/row_041_success_0917.json
+  - ../../data/rollouts/20251226_170149/row_041_success_0919.json
+
+- name: row_042
+  sampling_weight: 0.01816088701743134
+  rollouts: []
+
+- name: row_043
+  sampling_weight: 0.00520318124573003
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_043_success_0847.json
+  - ../../data/rollouts/20251226_170149/row_043_success_0849.json
+  - ../../data/rollouts/20251226_170149/row_043_success_0850.json
+  - ../../data/rollouts/20251226_170149/row_043_success_0851.json
+  - ../../data/rollouts/20251226_170149/row_043_success_0852.json
+  - ../../data/rollouts/20251226_170149/row_043_success_0853.json
+  - ../../data/rollouts/20251226_170149/row_043_success_0916.json
+
+- name: row_044
+  sampling_weight: 0.0038067287196181473
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_044_success_0859.json
+  - ../../data/rollouts/20251226_170149/row_044_success_0860.json
+  - ../../data/rollouts/20251226_170149/row_044_success_0861.json
+  - ../../data/rollouts/20251226_170149/row_044_success_0862.json
+  - ../../data/rollouts/20251226_170149/row_044_success_0863.json
+  - ../../data/rollouts/20251226_170149/row_044_success_0864.json
+  - ../../data/rollouts/20251226_170149/row_044_success_0866.json
+  - ../../data/rollouts/20251226_170149/row_044_success_0868.json
+  - ../../data/rollouts/20251226_170149/row_044_success_0871.json
+  - ../../data/rollouts/20251226_170149/row_044_success_0921.json
+
+- name: row_045
+  sampling_weight: 0.01816088701743134
+  rollouts:
+  - ../../data/rollouts/20251219_augmented/row_045.augmented.json
+
+- name: row_046
+  sampling_weight: 0.014313096802798781
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_046_success_0966.json
+
+- name: row_047
+  sampling_weight: 0.007229844909508263
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_047_success_0920.json
+  - ../../data/rollouts/20251226_170149/row_047_success_0932.json
+  - ../../data/rollouts/20251226_170149/row_047_success_0937.json
+  - ../../data/rollouts/20251226_170149/row_047_success_0938.json
+  - ../../data/rollouts/20251226_170149/row_047_success_0941.json
+  - ../../data/rollouts/20251226_170149/row_047_success_0970.json
+  - ../../data/rollouts/20251226_170149/row_047_success_1020.json
+
+- name: row_048
+  sampling_weight: 0.009406260513947594
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_048_success_0943.json
+  - ../../data/rollouts/20251226_170149/row_048_success_1005.json
+  - ../../data/rollouts/20251226_170149/row_048_success_1006.json
+  - ../../data/rollouts/20251226_170149/row_048_success_1014.json
+  - ../../data/rollouts/20251226_170149/row_048_success_1025.json
+
+- name: row_049
+  sampling_weight: 0.01816088701743134
+  rollouts: []
+
+- name: row_050
+  sampling_weight: 0.00520318124573003
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_050_success_0993.json
+  - ../../data/rollouts/20251226_170149/row_050_success_0997.json
+  - ../../data/rollouts/20251226_170149/row_050_success_1003.json
+  - ../../data/rollouts/20251226_170149/row_050_success_1010.json
+  - ../../data/rollouts/20251226_170149/row_050_success_1011.json
+  - ../../data/rollouts/20251226_170149/row_050_success_1013.json
+  - ../../data/rollouts/20251226_170149/row_050_success_1016.json
+
+- name: row_051
+  sampling_weight: 0.0029035580049289324
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_051_success_1021.json
+  - ../../data/rollouts/20251226_170149/row_051_success_1022.json
+  - ../../data/rollouts/20251226_170149/row_051_success_1028.json
+  - ../../data/rollouts/20251226_170149/row_051_success_1030.json
+  - ../../data/rollouts/20251226_170149/row_051_success_1032.json
+  - ../../data/rollouts/20251226_170149/row_051_success_1033.json
+  - ../../data/rollouts/20251226_170149/row_051_success_1034.json
+  - ../../data/rollouts/20251226_170149/row_051_success_1036.json
+  - ../../data/rollouts/20251226_170149/row_051_success_1039.json
+  - ../../data/rollouts/20251226_170149/row_051_success_1040.json
+  - ../../data/rollouts/20251226_170149/row_051_success_1041.json
+
+- name: row_052
+  sampling_weight: 0.011015134783649232
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_052_success_1044.json
+  - ../../data/rollouts/20251226_170149/row_052_success_1045.json
+  - ../../data/rollouts/20251226_170149/row_052_success_1050.json
+  - ../../data/rollouts/20251226_170149/row_052_success_1113.json
+  - ../../data/rollouts/20251219_augmented/row_052.augmented.json
+
+- name: row_053
+  sampling_weight: 0.01816088701743134
+  rollouts:
+  - ../../data/rollouts/20251219_augmented/row_053.augmented.json
+
+- name: row_054
+  sampling_weight: 0.016210089433548937
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_054_success_1097.json
+
+- name: row_055
+  sampling_weight: 0.006530888143898534
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_055_success_1121.json
+  - ../../data/rollouts/20251226_170149/row_055_success_1133.json
+  - ../../data/rollouts/20251226_170149/row_055_success_1135.json
+  - ../../data/rollouts/20251226_170149/row_055_success_1138.json
+  - ../../data/rollouts/20251226_170149/row_055_success_1142.json
+  - ../../data/rollouts/20251226_170149/row_055_success_1181.json
+  - ../../data/rollouts/20251226_170149/row_055_success_1197.json
+  - ../../data/rollouts/20251226_170149/row_055_success_1198.json
+
+- name: row_056
+  sampling_weight: 0.004787157843437958
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_056_success_1160.json
+  - ../../data/rollouts/20251226_170149/row_056_success_1163.json
+  - ../../data/rollouts/20251226_170149/row_056_success_1164.json
+  - ../../data/rollouts/20251226_170149/row_056_success_1165.json
+  - ../../data/rollouts/20251226_170149/row_056_success_1172.json
+  - ../../data/rollouts/20251226_170149/row_056_success_1173.json
+  - ../../data/rollouts/20251226_170149/row_056_success_1194.json
+  - ../../data/rollouts/20251226_170149/row_056_success_1199.json
+
+- name: row_057
+  sampling_weight: 0.013286788777486933
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_057_success_1207.json
+  - ../../data/rollouts/20251226_170149/row_057_success_1273.json
+  - ../../data/rollouts/20251226_170149/row_057_success_1297.json
+
+- name: row_058
+  sampling_weight: 0.0029035580049289324
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_058_success_1244.json
+  - ../../data/rollouts/20251226_170149/row_058_success_1245.json
+  - ../../data/rollouts/20251226_170149/row_058_success_1246.json
+  - ../../data/rollouts/20251226_170149/row_058_success_1247.json
+  - ../../data/rollouts/20251226_170149/row_058_success_1249.json
+  - ../../data/rollouts/20251226_170149/row_058_success_1250.json
+  - ../../data/rollouts/20251226_170149/row_058_success_1255.json
+  - ../../data/rollouts/20251226_170149/row_058_success_1257.json
+  - ../../data/rollouts/20251226_170149/row_058_success_1258.json
+  - ../../data/rollouts/20251226_170149/row_058_success_1264.json
+
+- name: row_059
+  sampling_weight: 0.004834321580492487
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_059_success_1266.json
+  - ../../data/rollouts/20251226_170149/row_059_success_1268.json
+  - ../../data/rollouts/20251226_170149/row_059_success_1271.json
+  - ../../data/rollouts/20251226_170149/row_059_success_1272.json
+  - ../../data/rollouts/20251226_170149/row_059_success_1280.json
+  - ../../data/rollouts/20251226_170149/row_059_success_1300.json
+  - ../../data/rollouts/20251226_170149/row_059_success_1301.json
+  - ../../data/rollouts/20251226_170149/row_059_success_1303.json
+  - ../../data/rollouts/20251226_170149/row_059_success_1314.json
+
+- name: row_060
+  sampling_weight: 0.003430148483482195
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_060_success_1306.json
+  - ../../data/rollouts/20251226_170149/row_060_success_1312.json
+  - ../../data/rollouts/20251226_170149/row_060_success_1313.json
+  - ../../data/rollouts/20251226_170149/row_060_success_1315.json
+  - ../../data/rollouts/20251226_170149/row_060_success_1316.json
+  - ../../data/rollouts/20251226_170149/row_060_success_1319.json
+  - ../../data/rollouts/20251226_170149/row_060_success_1324.json
+  - ../../data/rollouts/20251226_170149/row_060_success_1338.json
+  - ../../data/rollouts/20251226_170149/row_060_success_1339.json
+  - ../../data/rollouts/20251226_170149/row_060_success_1340.json
+
+- name: row_061
+  sampling_weight: 0.013533289912435135
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_061_success_1344.json
+  - ../../data/rollouts/20251226_170149/row_061_success_1345.json
+
+- name: row_062
+  sampling_weight: 0.0038067287196181473
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_062_success_1374.json
+  - ../../data/rollouts/20251226_170149/row_062_success_1387.json
+  - ../../data/rollouts/20251226_170149/row_062_success_1391.json
+  - ../../data/rollouts/20251226_170149/row_062_success_1395.json
+  - ../../data/rollouts/20251226_170149/row_062_success_1396.json
+  - ../../data/rollouts/20251226_170149/row_062_success_1397.json
+  - ../../data/rollouts/20251226_170149/row_062_success_1398.json
+  - ../../data/rollouts/20251226_170149/row_062_success_1400.json
+  - ../../data/rollouts/20251226_170149/row_062_success_1467.json
+  - ../../data/rollouts/20251219_augmented/row_062.augmented.json
+
+- name: row_063
+  sampling_weight: 0.00325606762265235
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_063_success_1404.json
+  - ../../data/rollouts/20251226_170149/row_063_success_1407.json
+  - ../../data/rollouts/20251226_170149/row_063_success_1408.json
+  - ../../data/rollouts/20251226_170149/row_063_success_1423.json
+  - ../../data/rollouts/20251226_170149/row_063_success_1424.json
+  - ../../data/rollouts/20251226_170149/row_063_success_1428.json
+  - ../../data/rollouts/20251226_170149/row_063_success_1431.json
+  - ../../data/rollouts/20251226_170149/row_063_success_1433.json
+  - ../../data/rollouts/20251226_170149/row_063_success_1434.json
+  - ../../data/rollouts/20251226_170149/row_063_success_1435.json
+  - ../../data/rollouts/20251226_170149/row_063_success_1500.json
+
+- name: row_064
+  sampling_weight: 0.011972394602370496
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_064_success_1442.json
+  - ../../data/rollouts/20251226_170149/row_064_success_1465.json
+
+- name: row_065
+  sampling_weight: 0.015677262167670656
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_065_success_1468.json
+
+- name: row_066
+  sampling_weight: 0.009406260513947594
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_066_success_1524.json
+  - ../../data/rollouts/20251226_170149/row_066_success_1529.json
+  - ../../data/rollouts/20251226_170149/row_066_success_1530.json
+  - ../../data/rollouts/20251226_170149/row_066_success_1590.json
+
+- name: row_067
+  sampling_weight: 0.008578595595143089
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_067_success_1560.json
+  - ../../data/rollouts/20251226_170149/row_067_success_1564.json
+  - ../../data/rollouts/20251226_170149/row_067_success_1568.json
+  - ../../data/rollouts/20251226_170149/row_067_success_1626.json
+  - ../../data/rollouts/20251226_170149/row_067_success_1629.json
+  - ../../data/rollouts/20251226_170149/row_067_success_1642.json
+
+- name: row_068
+  sampling_weight: 0.014868876704345703
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_068_success_1662.json
+  - ../../data/rollouts/20251226_170149/row_068_success_1898.json
+
+- name: row_069
+  sampling_weight: 0.014313096802798781
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_069_success_1608.json
+  - ../../data/rollouts/20251226_170149/row_069_success_1702.json
+
+- name: row_070
+  sampling_weight: 0.015533829850117932
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_070_success_1633.json
+
+- name: row_071
+  sampling_weight: 0.01008485630014801
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_071_success_1686.json
+  - ../../data/rollouts/20251226_170149/row_071_success_1688.json
+  - ../../data/rollouts/20251226_170149/row_071_success_1689.json
+
+- name: row_072
+  sampling_weight: 0.004450516765668796
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_072_success_1695.json
+  - ../../data/rollouts/20251226_170149/row_072_success_1696.json
+  - ../../data/rollouts/20251226_170149/row_072_success_1698.json
+  - ../../data/rollouts/20251226_170149/row_072_success_1705.json
+  - ../../data/rollouts/20251226_170149/row_072_success_1708.json
+  - ../../data/rollouts/20251226_170149/row_072_success_1711.json
+  - ../../data/rollouts/20251226_170149/row_072_success_1712.json
+  - ../../data/rollouts/20251226_170149/row_072_success_1715.json
+  - ../../data/rollouts/20251226_170149/row_072_success_1777.json
+
+- name: row_073
+  sampling_weight: 0.005655358766376882
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_073_success_1726.json
+  - ../../data/rollouts/20251226_170149/row_073_success_1729.json
+  - ../../data/rollouts/20251226_170149/row_073_success_1732.json
+  - ../../data/rollouts/20251226_170149/row_073_success_1733.json
+  - ../../data/rollouts/20251226_170149/row_073_success_1739.json
+  - ../../data/rollouts/20251226_170149/row_073_success_1747.json
+
+- name: row_074
+  sampling_weight: 0.017712493119327447
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_074_success_2486.json
+  - ../../data/rollouts/20251219_augmented/row_074.augmented.json
+
+- name: row_075
+  sampling_weight: 0.006083135173146199
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_075_success_1774.json
+  - ../../data/rollouts/20251226_170149/row_075_success_1776.json
+  - ../../data/rollouts/20251226_170149/row_075_success_1778.json
+  - ../../data/rollouts/20251226_170149/row_075_success_1780.json
+  - ../../data/rollouts/20251226_170149/row_075_success_1781.json
+  - ../../data/rollouts/20251226_170149/row_075_success_1784.json
+  - ../../data/rollouts/20251226_170149/row_075_success_1791.json
+
+- name: row_076
+  sampling_weight: 0.011527376390223427
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_076_success_1800.json
+  - ../../data/rollouts/20251226_170149/row_076_success_1880.json
+  - ../../data/rollouts/20251226_170149/row_076_success_1889.json
+  - ../../data/rollouts/20251226_170149/row_076_success_1904.json
+
+- name: row_077
+  sampling_weight: 0.011015134783649232
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_077_success_1819.json
+  - ../../data/rollouts/20251226_170149/row_077_success_1822.json
+  - ../../data/rollouts/20251226_170149/row_077_success_1825.json
+
+- name: row_078
+  sampling_weight: 0.016554825394685137
+  rollouts:
+  - ../../data/rollouts/20251219_augmented/row_078.augmented.json
+
+- name: row_079
+  sampling_weight: 0.01008485630014801
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_079_success_1870.json
+  - ../../data/rollouts/20251226_170149/row_079_success_1872.json
+  - ../../data/rollouts/20251226_170149/row_079_success_1875.json
+  - ../../data/rollouts/20251226_170149/row_079_success_1886.json
+
+- name: row_080
+  sampling_weight: 0.007111905541467744
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_080_success_1893.json
+  - ../../data/rollouts/20251226_170149/row_080_success_1894.json
+  - ../../data/rollouts/20251226_170149/row_080_success_1897.json
+  - ../../data/rollouts/20251226_170149/row_080_success_1908.json
+  - ../../data/rollouts/20251226_170149/row_080_success_1913.json
+  - ../../data/rollouts/20251226_170149/row_080_success_1914.json
+
+- name: row_081
+  sampling_weight: 0.008578595595143089
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_081_success_1925.json
+  - ../../data/rollouts/20251226_170149/row_081_success_1926.json
+  - ../../data/rollouts/20251226_170149/row_081_success_1928.json
+  - ../../data/rollouts/20251226_170149/row_081_success_2007.json
+  - ../../data/rollouts/20251226_170149/row_081_success_2012.json
+  - ../../data/rollouts/20251226_170149/row_081_success_2014.json
+
+- name: row_082
+  sampling_weight: 0.01586531185156863
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_082_success_2160.json
+  - ../../data/rollouts/20251219_augmented/row_082.augmented.json
+
+- name: row_083
+  sampling_weight: 0.016835885345321214
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_083_success_2063.json
+
+- name: row_084
+  sampling_weight: 0.004787157843437958
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_084_success_1983.json
+  - ../../data/rollouts/20251226_170149/row_084_success_1986.json
+  - ../../data/rollouts/20251226_170149/row_084_success_1988.json
+  - ../../data/rollouts/20251226_170149/row_084_success_1989.json
+  - ../../data/rollouts/20251226_170149/row_084_success_1990.json
+  - ../../data/rollouts/20251226_170149/row_084_success_1997.json
+  - ../../data/rollouts/20251226_170149/row_084_success_1998.json
+  - ../../data/rollouts/20251226_170149/row_084_success_1999.json
+
+- name: row_085
+  sampling_weight: 0.008578595595143089
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_085_success_2003.json
+  - ../../data/rollouts/20251226_170149/row_085_success_2009.json
+  - ../../data/rollouts/20251226_170149/row_085_success_2025.json
+  - ../../data/rollouts/20251226_170149/row_085_success_2074.json
+  - ../../data/rollouts/20251226_170149/row_085_success_2093.json
+  - ../../data/rollouts/20251226_170149/row_085_success_2097.json
+
+- name: row_086
+  sampling_weight: 0.012173606621572616
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_086_success_2115.json
+  - ../../data/rollouts/20251226_170149/row_086_success_2116.json
+  - ../../data/rollouts/20251226_170149/row_086_success_2136.json
+  - ../../data/rollouts/20251219_augmented/row_086.augmented.json
+
+- name: row_087
+  sampling_weight: 0.015677262167670656
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_087_success_2068.json
+
+- name: row_088
+  sampling_weight: 0.004450516765668796
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_088_success_2080.json
+  - ../../data/rollouts/20251226_170149/row_088_success_2082.json
+  - ../../data/rollouts/20251226_170149/row_088_success_2083.json
+  - ../../data/rollouts/20251226_170149/row_088_success_2089.json
+  - ../../data/rollouts/20251226_170149/row_088_success_2090.json
+  - ../../data/rollouts/20251226_170149/row_088_success_2092.json
+  - ../../data/rollouts/20251226_170149/row_088_success_2094.json
+  - ../../data/rollouts/20251226_170149/row_088_success_2100.json
+  - ../../data/rollouts/20251226_170149/row_088_success_2102.json
+
+- name: row_089
+  sampling_weight: 0.00520318124573003
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_089_success_2109.json
+  - ../../data/rollouts/20251226_170149/row_089_success_2111.json
+  - ../../data/rollouts/20251226_170149/row_089_success_2129.json
+  - ../../data/rollouts/20251226_170149/row_089_success_2130.json
+  - ../../data/rollouts/20251226_170149/row_089_success_2148.json
+  - ../../data/rollouts/20251226_170149/row_089_success_2149.json
+  - ../../data/rollouts/20251226_170149/row_089_success_2151.json
+  - ../../data/rollouts/20251226_170149/row_089_success_2193.json
+  - ../../data/rollouts/20251226_170149/row_089_success_2207.json
+  - ../../data/rollouts/20251226_170149/row_089_success_2211.json
+
+- name: row_090
+  sampling_weight: 0.016495974317794322
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_090_success_2233.json
+
+- name: row_091
+  sampling_weight: 0.01301284417578259
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_091_success_2188.json
+  - ../../data/rollouts/20251219_augmented/row_091.augmented.json
+
+- name: row_092
+  sampling_weight: 0.005978436658510027
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_092_success_2191.json
+  - ../../data/rollouts/20251226_170149/row_092_success_2204.json
+  - ../../data/rollouts/20251226_170149/row_092_success_2206.json
+  - ../../data/rollouts/20251226_170149/row_092_success_2208.json
+  - ../../data/rollouts/20251226_170149/row_092_success_2209.json
+  - ../../data/rollouts/20251226_170149/row_092_success_2210.json
+  - ../../data/rollouts/20251226_170149/row_092_success_2212.json
+  - ../../data/rollouts/20251226_170149/row_092_success_2276.json
+
+- name: row_093
+  sampling_weight: 0.00520318124573003
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_093_success_2213.json
+  - ../../data/rollouts/20251226_170149/row_093_success_2214.json
+  - ../../data/rollouts/20251226_170149/row_093_success_2218.json
+  - ../../data/rollouts/20251226_170149/row_093_success_2219.json
+  - ../../data/rollouts/20251226_170149/row_093_success_2220.json
+  - ../../data/rollouts/20251226_170149/row_093_success_2221.json
+  - ../../data/rollouts/20251226_170149/row_093_success_2223.json
+  - ../../data/rollouts/20251226_170149/row_093_success_2224.json
+
+- name: row_094
+  sampling_weight: 0.007892688962675115
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_094_success_2241.json
+  - ../../data/rollouts/20251226_170149/row_094_success_2244.json
+  - ../../data/rollouts/20251226_170149/row_094_success_2294.json
+  - ../../data/rollouts/20251226_170149/row_094_success_2313.json
+  - ../../data/rollouts/20251226_170149/row_094_success_2315.json
+  - ../../data/rollouts/20251226_170149/row_094_success_2320.json
+  - ../../data/rollouts/20251226_170149/row_094_success_2322.json
+  - ../../data/rollouts/20251226_170149/row_094_success_2330.json
+  - ../../data/rollouts/20251226_170149/row_094_success_2331.json
+  - ../../data/rollouts/20251219_augmented/row_094.augmented.json
+
+- name: row_095
+  sampling_weight: 0.014425638266472788
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_095_success_2519.json
+  - ../../data/rollouts/20251226_170149/row_095_success_2521.json
+  - ../../data/rollouts/20251226_170149/row_095_success_2522.json
+  - ../../data/rollouts/20251226_170149/row_095_success_2525.json
+  - ../../data/rollouts/20251226_170149/row_095_success_2528.json
+  - ../../data/rollouts/20251226_170149/row_095_success_2529.json
+
+- name: row_096
+  sampling_weight: 0.006681016967150342
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_096_success_2272.json
+  - ../../data/rollouts/20251226_170149/row_096_success_2273.json
+  - ../../data/rollouts/20251226_170149/row_096_success_2274.json
+  - ../../data/rollouts/20251226_170149/row_096_success_2277.json
+  - ../../data/rollouts/20251226_170149/row_096_success_2279.json
+  - ../../data/rollouts/20251226_170149/row_096_success_2292.json
+
+- name: row_097
+  sampling_weight: 0.007892688962675115
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_097_success_2293.json
+  - ../../data/rollouts/20251226_170149/row_097_success_2295.json
+  - ../../data/rollouts/20251226_170149/row_097_success_2298.json
+  - ../../data/rollouts/20251226_170149/row_097_success_2299.json
+  - ../../data/rollouts/20251226_170149/row_097_success_2317.json
+
+- name: row_098
+  sampling_weight: 0.015805869014337108
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_098_success_2344.json
+
+- name: row_099
+  sampling_weight: 0.01725755137209445
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_099_success_2449.json
+
+- name: row_100
+  sampling_weight: 0.013893388419374897
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_100_success_2446.json
+  - ../../data/rollouts/20251226_170149/row_100_success_2459.json
+
+- name: row_101
+  sampling_weight: 0.006681016967150342
+  rollouts:
+  - ../../data/rollouts/20251226_170149/row_101_success_2392.json
+  - ../../data/rollouts/20251226_170149/row_101_success_2397.json
+  - ../../data/rollouts/20251226_170149/row_101_success_2398.json
+  - ../../data/rollouts/20251226_170149/row_101_success_2399.json
+  - ../../data/rollouts/20251226_170149/row_101_success_2402.json
+  - ../../data/rollouts/20251226_170149/row_101_success_2403.json
+  - ../../data/rollouts/20251226_170149/row_101_success_2406.json
+  - ../../data/rollouts/20251226_170149/row_101_success_2465.json
+
+test_rollouts:
+- ../../data/rollouts/20251226_170149/row_002_success_0002.json
+- ../../data/rollouts/20251226_170149/row_006_success_0061.json
+- ../../data/rollouts/20251226_170149/row_010_success_0131.json
+- ../../data/rollouts/20251226_170149/row_014_success_0204.json
+- ../../data/rollouts/20251226_170149/row_018_success_0274.json
+- ../../data/rollouts/20251226_170149/row_022_success_0470.json
+- ../../data/rollouts/20251226_170149/row_026_success_0444.json
+- ../../data/rollouts/20251226_170149/row_030_success_0559.json
+- ../../data/rollouts/20251226_170149/row_034_success_0647.json
+- ../../data/rollouts/20251226_170149/row_038_success_0738.json
+- ../../data/rollouts/20251226_170149/row_043_success_0841.json
+- ../../data/rollouts/20251226_170149/row_046_success_0896.json
+- ../../data/rollouts/20251226_170149/row_050_success_0991.json
+- ../../data/rollouts/20251226_170149/row_055_success_1119.json
+- ../../data/rollouts/20251226_170149/row_058_success_1237.json
+- ../../data/rollouts/20251226_170149/row_062_success_1370.json
+- ../../data/rollouts/20251226_170149/row_066_success_1501.json
+- ../../data/rollouts/20251226_170149/row_071_success_1666.json
+- ../../data/rollouts/20251226_170149/row_073_success_1724.json
+- ../../data/rollouts/20251226_170149/row_078_success_1862.json
+- ../../data/rollouts/20251226_170149/row_082_success_2122.json
+- ../../data/rollouts/20251226_170149/row_086_success_2032.json
+- ../../data/rollouts/20251226_170149/row_091_success_2176.json
+- ../../data/rollouts/20251226_170149/row_095_success_2516.json
+- ../../data/rollouts/20251226_170149/row_100_success_2425.json

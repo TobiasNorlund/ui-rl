@@ -1,5 +1,7 @@
+from collections import defaultdict
 import re
 import logging
+import wandb
 from datetime import datetime
 from pathlib import Path
 from queue import Queue
@@ -10,13 +12,12 @@ from ui_rl.models.uitars15.rollout import UITARS15_Rollout
 from ui_rl.runtime.docker import DockerSessionRuntime
 
 from task import SimpleDataEntryTaskSpec
-from ui_rl.task import TaskSpec
 
 
 def main(
     vllm_host: str,
     model_name: str,
-    strategy: RolloutStrategy,
+    strategy: FixedStrategy | NSuccessfulStrategy,
     max_parallel: int,
     max_steps: int,
     output_dir: Path
@@ -38,6 +39,13 @@ def main(
     logging.info(f"Starting generation of rollouts, using {max_parallel} parallel workers")
     logging.info(f"Logs will be saved to: {output_dir}")
 
+    wandb.init(project="ui-rl", config={
+        "model_name": model_name,
+        "max_parallel": max_parallel,
+        "max_steps": max_steps,
+        "output_dir": output_dir
+    })
+
     # Create worker
     worker = SimpleDataEntryRolloutWorker(
         model_host=vllm_host,
@@ -52,6 +60,23 @@ def main(
         rollout_worker=worker,
         max_parallel=max_parallel,
     )
+
+    # Compute success rate for each row and log to w&b
+    n_success = defaultdict(lambda: 0)
+    n_tot = defaultdict(lambda: 0)
+    for rollout in output_dir.glob("row_*.json"):
+        _, row, res, _ = rollout.name.split("_")
+        row = int(row)
+        n_tot[row] += 1
+        if res == "success":
+            n_success[row] += 1
+    
+    table = wandb.Table(
+        data=[[row, n_success[row] / n_tot[row]] for row in n_tot.keys()],
+        columns=["row", "success rate"]
+    )
+    wandb.log({"result": wandb.plot.bar(table, "row", "success rate", title="Success Rate")})
+    wandb.finish()
 
 
 class SimpleDataEntryRolloutWorker(RolloutWorker):
@@ -70,7 +95,7 @@ class SimpleDataEntryRolloutWorker(RolloutWorker):
         # Initialize docker runtime for this worker
         cls._runtime = DockerSessionRuntime(httpx_client=cls._httpx_client, session_timeout=60)
 
-    def run(self, rollout_id: int, task_spec: TaskSpec):
+    def run(self, rollout_id: int, task_spec: SimpleDataEntryTaskSpec):
         rollout = UITARS15_Rollout(
             task_spec=task_spec,
             model_host=self._model_host,
@@ -92,13 +117,13 @@ class SimpleDataEntryRolloutWorker(RolloutWorker):
 
             # Save rollout
             result = RolloutResult(rollout_id, task_spec, rollout.progress, None)
-            file_name = f"rollout_{rollout_id:04d}_success.json" if rows_submitted_correctly(result) else f"rollout_{rollout_id:04d}_fail.json"
+            file_name = f"row_{task_spec.rows[0]:03d}_success_{rollout_id:04d}.json" if rows_submitted_correctly(result) else f"row_{task_spec.rows[0]:03d}_fail_{rollout_id:04d}.json"
             rollout.save(output_dir / file_name)
             return result
 
         except Exception as e:
             logging.error(f"Rollout {rollout_id} was stopped due to an error: {e}")
-            return RolloutResult(rollout_id, task_spec, rollout.progress, e) 
+            return RolloutResult(rollout_id, task_spec, rollout.progress, e)
 
 
 def rows_submitted_correctly(result: RolloutResult) -> bool:
@@ -114,23 +139,24 @@ def rows_submitted_correctly(result: RolloutResult) -> bool:
 
 def parse_strategy(strategy: str) -> RolloutStrategy:
     def _get_ids(ids: str):
-        all_ids = set[int]()
+        all_ids = list[int]()
         for id_group in ids.split(","):
             if "-" in id_group:
                 start, stop = id_group.split("-")
-                all_ids.update(range(int(start), int(stop)+1))
+                all_ids += list(range(int(start), int(stop)+1))
             else:
-                all_ids.add(int(id_group))
+                all_ids.append(int(id_group))
         return all_ids
 
     match strategy:
         case s if (m := re.match(r"fixed\((?P<ids>\S+)\)", s)):
             ids = _get_ids(m.group("ids"))
+
             return FixedStrategy(tasks=[
                 SimpleDataEntryTaskSpec(rows=[id])
                 for id in ids
             ])
-        case s if (m := re.match(r"nsuccessful\((?P<ids>\S+);(?P<min_successful>\d+);(?P<max_inflight_per_task>\d+);(?P<max_attempts>\d+)\)", s)):
+        case s if (m := re.match(r"nsuccessful\((?P<ids>\S+);(?P<min_successful>\d+);(?P<min_attempts>\d+);(?P<max_attempts>\d+)\)", s)):
             ids = _get_ids(m.group("ids"))
             return NSuccessfulStrategy(
                 tasks=[
@@ -139,7 +165,7 @@ def parse_strategy(strategy: str) -> RolloutStrategy:
                 ], 
                 min_successful=int(m.group("min_successful")),
                 is_rollout_success=rows_submitted_correctly,
-                max_inflight_per_task=int(m.group("max_inflight_per_task")),
+                min_attempts=int(m.group("min_attempts")),
                 max_attempts=int(m.group("max_attempts"))
             )
         case _:

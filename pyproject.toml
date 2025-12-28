@@ -29,6 +29,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "ipython>=9.6.0",
     "mypy>=1.19.0",
     "pytest",
 ]

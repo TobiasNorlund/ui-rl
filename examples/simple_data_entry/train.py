@@ -1,62 +1,78 @@
 from pathlib import Path
 import torch
-from torch.utils.data import DataLoader, Sampler, random_split
-from accelerate import Accelerator
-from typing import Any, List, Optional
-from collections import defaultdict, namedtuple
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, AutoTokenizer
+import yaml
+from torch.utils.data import DataLoader, IterableDataset
+from accelerate import Accelerator, DataLoaderConfiguration
+from collections import defaultdict
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, Qwen2_5_VLProcessor
 from peft import LoraConfig, get_peft_model, PeftModel
 from tqdm import tqdm
-from scipy.special import softmax
+from ui_rl.models.uitars15.dataset import UITARS15_RolloutDataset, UITARS15_ThoughtAugmentedRolloutDataset
 import wandb
-import pickle
+from pydantic import BaseModel
 import random
 import os
 from datetime import datetime
 
-from ui_rl.models.uitars15 import UITARS15_SFTDataset
+from ui_rl.models.uitars15 import UITARS15_RolloutDataset, UITARS15_ThoughtAugmentedRolloutDataset
 
 
-def main(
-    rollouts: str,
-    num_test_rollouts: int,
-    grad_accumulation_steps: int = 1, 
-    output_dir: Optional[str] = None, 
-    eval_checkpoint_steps: int = 100, 
-    lora_adapter_path: Optional[str] = None,
-    model_name: str = "ByteDance-Seed/UI-TARS-1.5-7B",
-    task_error_rates: dict | None = None,
-    sampler_temperature: float = 1.0,
-):
-    with open(rollouts) as f:
-        rollout_paths = [path.strip() for path in f]
+class RolloutGroup(BaseModel):
+    name: str
+    sampling_weight: float = 1.0
+    rollouts: list[str]
 
-    train_rollouts, test_rollouts = train_test_split(rollout_paths, test_num_or_ratio=num_test_rollouts)
-    print(f"Using {len(train_rollouts)} training and {len(test_rollouts)} test rollouts")
+
+class TrainConfig(BaseModel):
+    model_name: str
+    learning_rate: float
+    train_rollouts: list[RolloutGroup]
+    test_rollouts: list[str]
+    accelerate_kwargs: dict = {}
+    output_dir: str | None = None
+    eval_checkpoint_steps: int | None = None
+    lora_adapter_path: str | None = None
+
+
+def main(config_file: str):
+    # Disable as we use multi-worker dataloader 
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+    with open(config_file) as f:
+        config = TrainConfig(**yaml.safe_load(f))
+
+    accelerator = Accelerator(
+        dataloader_config=DataLoaderConfiguration(dispatch_batches=False),
+        # Need dispatch_batches=False as "pixel_values" and "image_grid_thw" lacks batch dim
+        **config.accelerate_kwargs
+    )
     
-    processor = AutoProcessor.from_pretrained(model_name)
-    train_ds = UITARS15_SFTDataset(processor, train_rollouts)
-    test_ds = UITARS15_SFTDataset(processor, test_rollouts)
+    processor = AutoProcessor.from_pretrained(config.model_name)
+    train_ds = SetGlobalUniqueRandomSeedWrapper(
+        StratifiedRolloutDataset(
+            rollout_groups=config.train_rollouts,
+            processor=processor,
+            random_seed=42
+        )
+    )
+    test_ds = torch.utils.data.ConcatDataset(
+        [UITARS15_RolloutDataset(processor, path) for path in config.test_rollouts]
+    )
 
-    sampler = ErrorBasedTaskUpsampler(
-        idx2task={i: r.task_spec["rows"][0] for i, r in train_ds.seqidx2rollout.items()},
-        task_error_rates=task_error_rates, 
-        temperature=sampler_temperature
-    ) if task_error_rates is not None else None
-
-    train_dataloader = DataLoader(train_ds, batch_size=1, collate_fn=lambda x: x[0], num_workers=1, sampler=sampler)
-    test_dataloader = DataLoader(test_ds, batch_size=1, collate_fn=lambda x: x[0], num_workers=1)
+    collator = Qwen2_5_VLCollate(processor)
+    train_dataloader = DataLoader(train_ds, batch_size=1, collate_fn=collator, num_workers=1)
+    test_dataloader = DataLoader(test_ds, batch_size=1, collate_fn=collator, num_workers=1)
 
     # Load model
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        model_name,
+        config.model_name,
         dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
     )
-    if lora_adapter_path is not None:
+    if config.lora_adapter_path is not None:
         # Continue training from an existing LoRA adapter
-        print(f"Loading LoRA adapter from: {lora_adapter_path}")
-        model = PeftModel.from_pretrained(model, lora_adapter_path, is_trainable=True)
+        print(f"Loading LoRA adapter from: {config.lora_adapter_path}")
+        model = PeftModel.from_pretrained(model, config.lora_adapter_path, is_trainable=True)
     else:
         # Start fresh with new LoRA adapter
         lora_config = LoraConfig(
@@ -76,36 +92,22 @@ def main(
 
     lr = 1e-4
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    accelerator = Accelerator(gradient_accumulation_steps=grad_accumulation_steps)
     model, optimizer, train_dataloader, test_dataloader = accelerator.prepare(model, optimizer, train_dataloader, test_dataloader)
 
     # Resolve default checkpoint directory (datetime-stamped) and ensure it exists
-    if output_dir is None:
+    if config.output_dir is None:
         repo_root = Path(__file__).parent.parent.parent
         output_root = repo_root / "data" / "checkpoints" / datetime.now().strftime("%Y%m%d_%H%M%S")
     else:
-        output_root = output_dir
+        output_root = config.output_dir
     if accelerator.is_main_process:
         os.makedirs(output_root, exist_ok=True)
     accelerator.wait_for_everyone()
 
     # Initialize Weights & Biases
     if accelerator.is_main_process:
-        run = wandb.init(project="ui-rl", config={
-            "lr": lr,
-            "batch_size": 1,
-            "grad_accum": grad_accumulation_steps,
-            "train_size": len(train_rollouts),
-            "test_size": len(test_rollouts),
-            "output_dir": output_root,
-            "eval_checkpoint_steps": eval_checkpoint_steps,
-        })
-
-        # Save list of rollout paths
-        rollout_path_file = os.path.join(run.dir, "rollouts.txt")
-        with open(rollout_path_file, "w") as f:
-            f.write("\n".join(rollout_paths))
-        wandb.save(rollout_path_file)
+        wandb.init(project="ui-rl", config={"config": config_file})
+        wandb.save(config_file)
 
     accelerator.wait_for_everyone()
 
@@ -114,7 +116,7 @@ def main(
         progress = tqdm(train_dataloader, disable=not accelerator.is_main_process)
         for batch in progress:
             # Evaluate and checkpoint every n steps
-            if global_step % eval_checkpoint_steps == 0:
+            if global_step % config.eval_checkpoint_steps == 0:
                 # Save LoRA adapter weights
                 checkpoint_dir = os.path.join(output_root, f"step_{global_step}")
                 peft_model = accelerator.unwrap_model(model)
@@ -163,78 +165,128 @@ def evaluate(model, dataloader, accelerator):
     return avg_loss
 
 
-def train_test_split(data: list, test_num_or_ratio: int | float):
-    """
-    Split data into train and test sets.
+class Qwen2_5_VLCollate:
+    def __init__(self, processor: Qwen2_5_VLProcessor):
+        self.processor = processor
 
-    Args:
-        data: List of data items to split
-        test_num_or_ratio: If int, the number of test samples. If float, the ratio of test samples (0.0 to 1.0)
+    def __call__(self, instances):
+        # Extract individual components
+        input_ids = [instance["input_ids"] for instance in instances]
+        labels = [instance["labels"] for instance in instances]
+        attention_mask = [instance["attention_mask"] for instance in instances]
+        
+        # pixel_values is a list of tensors, we need to concatenate them
+        # image_grid_thw is a list of tensors, we need to stack them
+        pixel_values = [instance["pixel_values"] for instance in instances]
+        image_grid_thw = [instance["image_grid_thw"] for instance in instances]
 
-    Returns:
-        tuple: (train_data, test_data)
-    """
-    total_size = len(data)
+        # 1. Pad text sequences
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            input_ids, batch_first=True, padding_value=self.processor.tokenizer.pad_token_id
+        )
+        labels = torch.nn.utils.rnn.pad_sequence(
+            labels, batch_first=True, padding_value=-100
+        )
+        attention_mask = torch.nn.utils.rnn.pad_sequence(
+            attention_mask, batch_first=True, padding_value=0
+        )
 
-    if isinstance(test_num_or_ratio, float):
-        if not 0.0 <= test_num_or_ratio <= 1.0:
-            raise ValueError(f"test_num_or_ratio as ratio must be between 0.0 and 1.0, got {test_num_or_ratio}")
-        test_size = int(total_size * test_num_or_ratio)
-    else:
-        test_size = test_num_or_ratio
-        if test_size < 0 or test_size > total_size:
-            raise ValueError(f"test_num_or_ratio as count must be between 0 and {total_size}, got {test_size}")
+        # 2. Flatten and concatenate visual data
+        # Since Qwen2.5-VL uses dynamic resolution, we concatenate all pixels
+        # from all images in the batch into one long tensor.
+        pixel_values = torch.cat(pixel_values, dim=0)
+        image_grid_thw = torch.cat(image_grid_thw, dim=0)
 
-    train_size = total_size - test_size
-
-    # Shuffle data with fixed seed for reproducibility
-    shuffled_data = data.copy()
-    random.shuffle(shuffled_data)
-
-    train_data = shuffled_data[:train_size]
-    test_data = shuffled_data[train_size:]
-
-    return train_data, test_data
+        return {
+            "input_ids": input_ids,
+            "labels": labels,
+            "attention_mask": attention_mask,
+            "pixel_values": pixel_values,
+            "image_grid_thw": image_grid_thw,
+        }
 
 
-class ErrorBasedTaskUpsampler(Sampler):
-    def __init__(self, idx2task: dict[int, Any], task_error_rates: dict[Any, float], temperature: float = 1.0, error_margin: float = 0.1):
-        self._task_error_rates = task_error_rates
-        self._temperature = temperature
-        self._error_margin = error_margin
-        self._task_indices = defaultdict(list)
-        for i, task in idx2task.items():
-            self._task_indices[task].append(i)
+class StratifiedRolloutDataset(IterableDataset):
+    def __init__(
+        self, 
+        rollout_groups: list[RolloutGroup],
+        processor: Qwen2_5_VLProcessor,
+        random_seed: int = 0
+    ):
+        self._group_datasets = defaultdict(list)  # list of datasets
+        self._sampling_weights = {group.name: group.sampling_weight for group in rollout_groups}
+        self._random_seed = random_seed
+
+        for group in rollout_groups:
+            for rollout_path in group.rollouts:
+                if rollout_path.endswith("augmented.json"):
+                    ds = UITARS15_ThoughtAugmentedRolloutDataset(processor, rollout_path, random_seed=random_seed)
+                else:
+                    ds = UITARS15_RolloutDataset(processor, rollout_path)
+                self._group_datasets[group.name].append(ds)
 
     def __iter__(self):
-        all_tasks = list(self._task_indices.keys())
-        weights = softmax([max(self._task_error_rates[task], self._error_margin) / self._temperature for task in all_tasks])
+        rng = random.Random(self._random_seed)
+
+        # Create iterator for each dataset
+        def get_ds_iterator(ds):
+            if isinstance(ds, UITARS15_RolloutDataset):
+                return self._random_sampler(rng, ds)
+            elif isinstance(ds, UITARS15_ThoughtAugmentedRolloutDataset):
+                return iter(ds)
+            else:
+                raise ValueError(f"Invalid dataset: {ds}")
+
+        grouped_dataset_iterators = {
+            group: [get_ds_iterator(ds) for ds in ds_lst]
+            for group, ds_lst in self._group_datasets.items()
+        }
+
+        all_groups = list(grouped_dataset_iterators.keys())
+        weights = [self._sampling_weights[group] for group in all_groups]
         while True:
-            # Sample row 
-            row = random.choices(population=all_tasks, weights=weights, k=1)[0]
-            # Sample index for that row uniformly
-            yield random.choice(self._task_indices[row])
+            # Sample a group according to normalized_group_weights
+            group = rng.choices(population=all_groups, weights=weights, k=1)[0]
+            # Sample uniformly an iterator from that group, and take the next in that group
+            yield next(rng.choice(grouped_dataset_iterators[group]))
+
+    @staticmethod
+    def _random_sampler(rng: random.Random, dataset: UITARS15_RolloutDataset):
+        while True:
+            yield rng.choice(dataset)
+
+
+class SetGlobalUniqueRandomSeedWrapper(IterableDataset):
+    """
+    Before __iter__, this wrapper updates iterable._random_seed to make it globally unique wrt:
+     - torch.distributed.get_rank()
+     - torch.utils.data.get_worker_info() 
+    """
+    def __init__(self, iterable):
+        self._iterable = iterable
+
+    def __iter__(self):
+        if hasattr(self._iterable, "_random_seed"):
+            # 1. Get distributed rank and world size
+            if torch.distributed.is_initialized():
+                rank = torch.distributed.get_rank()
+            else:
+                rank = 0
+
+            # 2. Get DataLoader worker info
+            worker_info = torch.utils.data.get_worker_info()
+            if worker_info is None:
+                worker_id = 0
+            else:
+                worker_id = worker_info.id
+            self._iterable._random_seed += 100_000 * rank + 1_000 * worker_id
+        
+        return iter(self._iterable)
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rollouts", required=True)
-    parser.add_argument("--num-test-rollouts", type=int)
-    parser.add_argument("--grad-accumulation-steps", type=int, default=1)
-    parser.add_argument("--output-dir", type=str, default=None)
-    parser.add_argument("--eval-checkpoint-steps", type=int, default=100)
-    parser.add_argument("--lora-adapter-path", type=str, default=None, help="Path to existing LoRA adapter to continue training from")
-    parser.add_argument("--model-name", type=str, default="ByteDance-Seed/UI-TARS-1.5-7B")
-    parser.add_argument("--task-error-rates")
-    parser.add_argument("--sampler-temperature", type=float, default=1.0)
+    parser.add_argument("config")
     args = parser.parse_args()
-
-    if args.task_error_rates:
-        # Unpickle
-        with open(args.task_error_rates, "rb") as f:
-            args.task_error_rates = pickle.load(f)
-
-    random.seed(42)
-
-    main(**vars(args))
+    main(args.config)
