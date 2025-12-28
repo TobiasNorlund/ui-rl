@@ -14,7 +14,7 @@ cd examples/simple_data_entry
 # 2. Start vLLM model host on each available GPUs (optionally with lora checkpoint preloaded)
 #    Note: Requires docker compose
 uv run launch_vllm.py --limit-mm-per-prompt '{"image":10, "video":0}' --max-num-seqs 8 \
-    --extra-mount "$(realpath ../../)/data/checkpoints:/app/models" --enable-lora --max-lora-rank 64 --lora-modules step_2000=/app/models/20251210_195352/step_2000
+    --extra-mount "$(realpath ../../)/data/checkpoints:/app/models" --enable-lora --max-lora-rank 64 --lora-modules 20251210_195352/step_2000=/app/models/20251210_195352/step_2000
 
 # 3. Once vLLM is ready, start generating rollouts
 uv run rollout_uitars15_docker.py --vllm-host localhost:8000 --strategy "nsuccessful(2-101;1;10;100)" --model-name step_2000 --max-parallel 120

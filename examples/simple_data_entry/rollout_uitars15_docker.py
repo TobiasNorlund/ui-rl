@@ -1,5 +1,7 @@
+from collections import defaultdict
 import re
 import logging
+import wandb
 from datetime import datetime
 from pathlib import Path
 from queue import Queue
@@ -10,13 +12,12 @@ from ui_rl.models.uitars15.rollout import UITARS15_Rollout
 from ui_rl.runtime.docker import DockerSessionRuntime
 
 from task import SimpleDataEntryTaskSpec
-from ui_rl.task import TaskSpec
 
 
 def main(
     vllm_host: str,
     model_name: str,
-    strategy: RolloutStrategy,
+    strategy: FixedStrategy | NSuccessfulStrategy,
     max_parallel: int,
     max_steps: int,
     output_dir: Path
@@ -38,6 +39,13 @@ def main(
     logging.info(f"Starting generation of rollouts, using {max_parallel} parallel workers")
     logging.info(f"Logs will be saved to: {output_dir}")
 
+    wandb.init(project="ui-rl", config={
+        "model_name": model_name,
+        "max_parallel": max_parallel,
+        "max_steps": max_steps,
+        "output_dir": output_dir
+    })
+
     # Create worker
     worker = SimpleDataEntryRolloutWorker(
         model_host=vllm_host,
@@ -52,6 +60,23 @@ def main(
         rollout_worker=worker,
         max_parallel=max_parallel,
     )
+
+    # Compute success rate for each row and log to w&b
+    n_success = defaultdict(lambda: 0)
+    n_tot = defaultdict(lambda: 0)
+    for rollout in output_dir.glob("row_*.json"):
+        _, row, res, _ = rollout.name.split("_")
+        row = int(row)
+        n_tot[row] += 1
+        if res == "success":
+            n_success[row] += 1
+    
+    table = wandb.Table(
+        data=[[row, n_success[row] / n_tot[row]] for row in n_tot.keys()],
+        columns=["row", "success rate"]
+    )
+    wandb.log({"result": wandb.plot.bar(table, "row", "success rate", title="Success Rate")})
+    wandb.finish()
 
 
 class SimpleDataEntryRolloutWorker(RolloutWorker):
