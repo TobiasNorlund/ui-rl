@@ -91,13 +91,13 @@ class NSuccessfulStrategy(RolloutStrategy):
         tasks: list[TaskSpec], 
         min_successful: int, 
         is_rollout_success: Callable[[RolloutResult], bool],
-        max_inflight_per_task: int = 100, 
+        min_attempts: int = 1,
         max_attempts: int = 100
     ):
         self._tasks = tasks
         self._min_successful = min_successful
         self._is_rollout_success = is_rollout_success
-        self._max_inflight_per_task = max_inflight_per_task
+        self._min_attempts = min_attempts
         self._max_attempts = max_attempts
         self._success_counter = {
             task: 0
@@ -113,15 +113,34 @@ class NSuccessfulStrategy(RolloutStrategy):
         }
 
     def next_task(self):
-        for task in self._tasks:
-            if (self._success_counter[task] < self._min_successful
-                and self._attempt_counter[task] < self._max_attempts
-                and self._inflight_counter[task] < self._max_inflight_per_task):
-                self._attempt_counter[task] += 1
-                self._inflight_counter[task] += 1
-                return task
-        else:
+        # Prioritize: 1) Least successes 2) Least attempts 3) Least in-flights
+        tasks = [
+            task for task in self._tasks if \
+                self._attempt_counter[task] < self._min_attempts or \
+                (
+                    self._success_counter[task] < self._min_successful and \
+                    self._attempt_counter[task] < self._max_attempts
+                )
+        ]
+        if len(tasks) == 0:
             return None
+
+        # Get tasks with least successes
+        tasks = sorted(tasks, key=lambda task: self._success_counter[task])
+        tasks = [task for task in tasks if self._success_counter[task] == self._success_counter[tasks[0]]]
+
+        # Get tasks with least attempts
+        tasks = sorted(tasks, key=lambda task: self._attempt_counter[task])
+        tasks = [task for task in tasks if self._attempt_counter[task] == self._attempt_counter[tasks[0]]]
+
+        # Get tasks with least in-flight
+        tasks = sorted(tasks, key=lambda task: self._inflight_counter[task])
+        tasks = [task for task in tasks if self._inflight_counter[task] == self._inflight_counter[tasks[0]]]
+
+        task = tasks[0]
+        self._attempt_counter[task] += 1
+        self._inflight_counter[task] += 1
+        return task
 
     def on_rollout_finish(self, result: RolloutResult):
         """

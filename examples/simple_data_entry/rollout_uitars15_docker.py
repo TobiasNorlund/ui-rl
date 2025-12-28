@@ -131,7 +131,7 @@ def parse_strategy(strategy: str) -> RolloutStrategy:
                 SimpleDataEntryTaskSpec(rows=[id])
                 for id in ids
             ])
-        case s if (m := re.match(r"nsuccessful\((?P<ids>\S+);(?P<min_successful>\d+);(?P<max_inflight_per_task>\d+);(?P<max_attempts>\d+)\)", s)):
+        case s if (m := re.match(r"nsuccessful\((?P<ids>\S+);(?P<min_successful>\d+);(?P<min_attempts>\d+);(?P<max_attempts>\d+)\)", s)):
             ids = _get_ids(m.group("ids"))
             return NSuccessfulStrategy(
                 tasks=[
@@ -140,7 +140,7 @@ def parse_strategy(strategy: str) -> RolloutStrategy:
                 ], 
                 min_successful=int(m.group("min_successful")),
                 is_rollout_success=rows_submitted_correctly,
-                max_inflight_per_task=int(m.group("max_inflight_per_task")),
+                min_attempts=int(m.group("min_attempts")),
                 max_attempts=int(m.group("max_attempts"))
             )
         case _:
