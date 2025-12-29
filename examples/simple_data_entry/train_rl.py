@@ -45,15 +45,17 @@ def main(config_file: str):
         **config.accelerate_kwargs
     )
     
+    print("Loading data...")
     processor = AutoProcessor.from_pretrained(config.model_name)
     train_ds = torch.utils.data.ConcatDataset(
-        [UITARS15_RolloutDataset(processor, path) for path in config.train_rollouts]
+        [UITARS15_RolloutDataset(processor, path, reward_fn=reward_fn) for path in tqdm(config.train_rollouts)]
     )
 
     collator = Qwen2_5_VLCollate(processor)
-    train_dataloader = DataLoader(train_ds, batch_size=1, collate_fn=collator, num_workers=1)
+    train_dataloader = DataLoader(train_ds, batch_size=1, shuffle=True, collate_fn=collator, num_workers=2)
 
     # Load model
+    print("Loading model...")
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         config.model_name,
         dtype=torch.bfloat16,
@@ -82,7 +84,7 @@ def main(config_file: str):
 
     lr = 1e-4
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    model, optimizer, train_dataloader, test_dataloader = accelerator.prepare(model, optimizer, train_dataloader, test_dataloader)
+    model, optimizer, train_dataloader = accelerator.prepare(model, optimizer, train_dataloader)
 
     # Resolve default checkpoint directory (datetime-stamped) and ensure it exists
     if config.output_dir is None:
@@ -107,7 +109,7 @@ def main(config_file: str):
         for batch in progress:
             # Evaluate and checkpoint every n steps
             if global_step % config.eval_checkpoint_steps == 0 and global_step > 0:
-                # Save LoRA adapter weights
+                # Save LoRA adapter weights 
                 checkpoint_dir = os.path.join(output_root, f"step_{global_step}")
                 peft_model = accelerator.unwrap_model(model)
                 peft_model.save_pretrained(checkpoint_dir, safe_serialization=True)
@@ -128,6 +130,10 @@ def main(config_file: str):
                     wandb.log({"train_loss": loss.item(), "epoch": epoch, "step": global_step})
                 progress.set_postfix({"loss": f"{loss.item():.4f}", "step": global_step})
                 accelerator.backward(loss)
+                if accelerator.sync_gradients:
+                    grad_norm = accelerator.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    if accelerator.is_main_process:
+                        wandb.log({"grad_norm": grad_norm.item(), "step": global_step})
                 optimizer.step()
                 optimizer.zero_grad()
                 global_step += 1

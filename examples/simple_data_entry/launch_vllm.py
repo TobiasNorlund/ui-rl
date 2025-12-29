@@ -85,16 +85,38 @@ networks:
 def get_gpu_count():
     try:
         result = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], 
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
             encoding="utf-8"
         )
         return len(result.strip().split("\n"))
     except Exception:
         print("⚠️  Could not detect GPUs. Defaulting to 1.")
         return 1
-    
+
+
+def remove_existing_containers(gpus: list[int]):
+    """Remove existing vllm containers if they exist"""
+    container_names = ["vllm-router"] + [f"vllm-gpu-{i}" for i in gpus]
+
+    for container_name in container_names:
+        try:
+            # Check if container exists (running or stopped)
+            result = subprocess.run(
+                ["docker", "ps", "-a", "-q", "-f", f"name=^{container_name}$"],
+                capture_output=True,
+                encoding="utf-8"
+            )
+            if result.stdout.strip():
+                print(f"🗑️  Removing existing container: {container_name}")
+                subprocess.run(["docker", "rm", "-f", container_name], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️  Failed to remove container {container_name}: {e}")
+
 
 def launch(gpus: list[int], model_name: str, extra_mount: str | None, vllm_args: list[str]):
+    # Remove existing containers first
+    remove_existing_containers(gpus)
+
     # Write nginx.conf and docker compose
     with tempfile.TemporaryDirectory() as tmpdir:
         # Nginx config

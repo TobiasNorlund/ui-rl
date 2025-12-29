@@ -20,11 +20,4 @@ uv run launch_vllm.py --limit-mm-per-prompt '{"image":10, "video":0}' --max-num-
 uv run rollout_uitars15_docker.py --vllm-host localhost:8000 --strategy "nsuccessful(2-101;1;10;100)" --model-name step_2000 --max-parallel 120
 ```
 
-## Example: Fine-tune model on successful rollouts (e.g. Rejection Sampling)
-# 7. Run SFT on the successful rollouts (=rejection sampling)
-uv run ui_rl/train.py \
-    --rollouts `find data/rollouts/20251128_132027/ -name "*_success.json"` \
-    --grad-accumulation-steps 8 \
-    --eval-checkpoint-steps 1000 \
-    --lora-adapter-path data/checkpoints/20251120_120610/step_10000
 ```

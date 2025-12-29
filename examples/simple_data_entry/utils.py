@@ -13,6 +13,7 @@ class Qwen2_5_VLCollate:
         input_ids = [instance["input_ids"] for instance in instances]
         labels = [instance["labels"] for instance in instances]
         attention_mask = [instance["attention_mask"] for instance in instances]
+        reward = [instance["reward"] for instance in instances]
         
         # pixel_values is a list of tensors, we need to concatenate them
         # image_grid_thw is a list of tensors, we need to stack them
@@ -36,10 +37,14 @@ class Qwen2_5_VLCollate:
         pixel_values = torch.cat(pixel_values, dim=0)
         image_grid_thw = torch.cat(image_grid_thw, dim=0)
 
+        # 3. Stack rewards
+        reward = torch.stack(reward) 
+
         return {
             "input_ids": input_ids,
             "labels": labels,
             "attention_mask": attention_mask,
             "pixel_values": pixel_values,
             "image_grid_thw": image_grid_thw,
+            "reward": reward
         }

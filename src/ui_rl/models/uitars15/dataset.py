@@ -67,7 +67,7 @@ class UITARS15_RolloutDataset(Dataset):
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "labels": labels,
-            "reward": torch.tensor(self._reward, dtype=torch.float32)
+            "reward": torch.tensor(self._reward, dtype=torch.float32),
             **image_inputs
         }
 
