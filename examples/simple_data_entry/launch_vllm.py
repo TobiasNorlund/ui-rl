@@ -1,5 +1,7 @@
+from contextlib import contextmanager
 import shlex
 import sys
+import signal
 import tempfile
 import subprocess
 import os
@@ -50,7 +52,7 @@ services:
 
 SERVICE_TEMPLATE = """
   vllm-gpu-{id}:
-    image: vllm/vllm-openai:latest
+    image: {docker_image}
     container_name: vllm-gpu-{id}
     runtime: nvidia
     environment:
@@ -58,7 +60,7 @@ SERVICE_TEMPLATE = """
       - VLLM_HTTP_TIMEOUT_KEEP_ALIVE=60
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
-      {extra_mount}
+{mount}
     command: >
       {model_name}
       --port 8000
@@ -90,8 +92,7 @@ def get_gpu_count():
         )
         return len(result.strip().split("\n"))
     except Exception:
-        print("⚠️  Could not detect GPUs. Defaulting to 1.")
-        return 1
+        raise RuntimeError("Couldn't detect any GPU")
 
 
 def remove_existing_containers(gpus: list[int]):
@@ -113,7 +114,8 @@ def remove_existing_containers(gpus: list[int]):
             print(f"⚠️  Failed to remove container {container_name}: {e}")
 
 
-def launch(gpus: list[int], model_name: str, extra_mount: str | None, vllm_args: list[str]):
+@contextmanager
+def launch(gpus: list[int], model_name: str, mounts: list[str] | None, docker_image: str = "vllm/vllm-openai:latest", vllm_args: list[str] = []):
     # Remove existing containers first
     remove_existing_containers(gpus)
 
@@ -127,13 +129,14 @@ def launch(gpus: list[int], model_name: str, extra_mount: str | None, vllm_args:
             ))
         
         # Docker compose config
-        extra_mount_str = f"- {extra_mount}" if extra_mount else ""
+        mount_str = "\n".join(f"      - {m}" for m in mounts) if mounts else ""
         services_yaml = ""
         for i in gpus:
             services_yaml += SERVICE_TEMPLATE.format(
                 id=i,
+                docker_image=docker_image,
                 model_name=model_name,
-                extra_mount=extra_mount_str,
+                mount=mount_str,
                 vllm_args=" ".join(shlex.quote(arg) for arg in vllm_args)
             )
         depends_on = [f"- vllm-gpu-{i}" for i in gpus]
@@ -150,10 +153,20 @@ def launch(gpus: list[int], model_name: str, extra_mount: str | None, vllm_args:
             f.write(compose_content)
         
         # Launch
-        subprocess.run(["docker", "compose", "-f", os.path.join(tmpdir, "docker-compose.yml"), "up"], env=os.environ.copy())
+        proc = subprocess.Popen(["docker", "compose", "-f", os.path.join(tmpdir, "docker-compose.yml"), "up"], env=os.environ.copy())
+
+        yield proc
 
         # Cleanup
         subprocess.run(["docker", "compose", "-f", os.path.join(tmpdir, "docker-compose.yml"), "down"])
+
+
+def main(gpus: list[int], model_name: str, docker_image: str, mounts: list[str] | None, vllm_args: list[str]):
+    with launch(gpus, model_name, mounts, docker_image, vllm_args) as proc:
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            print("Stopping...")
 
 
 if __name__ == "__main__":
@@ -161,7 +174,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpus", nargs="+")
     parser.add_argument("--model", default="ByteDance-Seed/UI-TARS-1.5-7B")
-    parser.add_argument("--extra-mount")
+    parser.add_argument("--image", default="vllm/vllm-openai:latest")
+    parser.add_argument("--mount", nargs="+")
     args, vllm_args = parser.parse_known_args()
 
     if args.gpus:
@@ -169,9 +183,10 @@ if __name__ == "__main__":
     else:
         gpus = list(range(get_gpu_count()))
 
-    launch(
+    main(
         gpus=gpus,
         model_name=args.model,
-        extra_mount=args.extra_mount,
+        mounts=args.mount,
+        docker_image=args.image,
         vllm_args=vllm_args
     )
