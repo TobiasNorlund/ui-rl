@@ -118,7 +118,7 @@ class SimpleDataEntryRolloutWorker(RolloutWorker):
             # Save rollout
             result = RolloutResult(rollout_id, task_spec, rollout.progress, None)
             file_name = f"row_{task_spec.rows[0]:03d}_success_{rollout_id:04d}.json" if rows_submitted_correctly(result) else f"row_{task_spec.rows[0]:03d}_fail_{rollout_id:04d}.json"
-            rollout.save(output_dir / file_name)
+            rollout.save(self._output_dir / file_name)
             return result
 
         except Exception as e:
