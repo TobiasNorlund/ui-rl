@@ -5,7 +5,6 @@ from accelerate import Accelerator, DataLoaderConfiguration
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
 from peft import LoraConfig, get_peft_model, PeftModel
 from tqdm import tqdm
-import wandb
 from pydantic import BaseModel
 import os
 from ui_rl.models.uitars15 import UITARS15_RolloutDataset
@@ -103,8 +102,7 @@ def main(config_file: str):
 
     peft_model: PeftModel = accelerator.unwrap_model(model)
     peft_model.save_pretrained(config.output_dir, safe_serialization=True)
-    optimizer = accelerator.unwrap_optimizer(optimizer)
-    torch.save(optimizer.state_dict(), optimizer_path)
+    torch.save(optimizer.state_dict(), os.path.join(config.output_dir, "optimizer.pt"))
 
 
 if __name__ == "__main__":

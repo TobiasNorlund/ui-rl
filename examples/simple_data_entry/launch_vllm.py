@@ -115,7 +115,14 @@ def remove_existing_containers(gpus: list[int]):
 
 
 @contextmanager
-def launch(gpus: list[int], model_name: str, mounts: list[str] | None, docker_image: str = "vllm/vllm-openai:latest", vllm_args: list[str] = []):
+def launch(
+    gpus: list[int], 
+    model_name: str, 
+    mounts: list[str] | None, 
+    docker_image: str = "vllm/vllm-openai:latest", 
+    vllm_args: list[str] = [],
+    detach: bool = False
+):
     # Remove existing containers first
     remove_existing_containers(gpus)
 
@@ -153,7 +160,7 @@ def launch(gpus: list[int], model_name: str, mounts: list[str] | None, docker_im
             f.write(compose_content)
         
         # Launch
-        proc = subprocess.Popen(["docker", "compose", "-f", os.path.join(tmpdir, "docker-compose.yml"), "up"], env=os.environ.copy())
+        proc = subprocess.Popen(["docker", "compose", "-f", os.path.join(tmpdir, "docker-compose.yml"), "up", "--detach" if detach else ""], env=os.environ.copy())
 
         yield proc
 
@@ -162,7 +169,7 @@ def launch(gpus: list[int], model_name: str, mounts: list[str] | None, docker_im
 
 
 def main(gpus: list[int], model_name: str, docker_image: str, mounts: list[str] | None, vllm_args: list[str]):
-    with launch(gpus, model_name, mounts, docker_image, vllm_args) as proc:
+    with launch(gpus, model_name, mounts, docker_image, vllm_args, detach=False) as proc:
         try:
             proc.wait()
         except KeyboardInterrupt:
@@ -188,5 +195,5 @@ if __name__ == "__main__":
         model_name=args.model,
         mounts=args.mount,
         docker_image=args.image,
-        vllm_args=vllm_args
+        vllm_args=vllm_args,
     )
