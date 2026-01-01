@@ -1,7 +1,5 @@
 from contextlib import contextmanager
 import shlex
-import sys
-import signal
 import tempfile
 import subprocess
 import os

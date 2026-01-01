@@ -7,17 +7,13 @@ requires-python = ">=3.12"
 authors = [{name = "Tobias Norlund", email = "tobias@norlund.se"}]
 
 dependencies = [
-    "accelerate>=1.11.0",
-    "datasets>=4.3.0",
     "docker>=7.1.0",
-    "flash-attn>=2.8.3",
+    "httpx>=0.28.1",
     "kubernetes>=34.1.0",
-    "litellm>=1.80.8",
-    "peft>=0.17.1",
     "pillow>=11.3.0",
     "torch<2.9",
     "tqdm>=4.67.1",
-    "vllm>=0.11.0",
+    "transformers>=4.57.3",
 ]
 
 [tool.uv.workspace]

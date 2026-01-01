@@ -10,8 +10,9 @@ import time
 import httpx
 import docker  # type: ignore
 from docker.models.containers import Container  # type: ignore
-from . import CUASessionRuntime
-from ..cua import State, Action
+
+from ui_rl.runtime import CUASessionRuntime
+from ui_rl.cua import State, Action
 
 
 logger = logging.getLogger(__name__)

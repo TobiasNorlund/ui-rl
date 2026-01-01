@@ -1,9 +1,9 @@
 import logging
 
-from .task import TaskSpec
-from .runtime import CUASessionRuntime
-from .cua import Action, ActionType
-from .models.uitars15 import UITARS15_Rollout
+from ui_rl.task import TaskSpec
+from ui_rl.runtime import CUASessionRuntime
+from ui_rl.cua import Action, ActionType
+from ui_rl.models.uitars15 import UITARS15_Rollout
 
 
 logger = logging.getLogger(__name__)

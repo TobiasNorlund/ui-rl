@@ -9,15 +9,15 @@ import io
 import uuid
 import time
 import httpx
-from . import CUASessionRuntime
-from ..cua import State, Action
+from ui_rl.runtime import CUASessionRuntime
+from ui_rl.cua import State, Action
 
 
 logger = logging.getLogger(__name__)
 
 
 class KubernetesSessionRuntime(CUASessionRuntime):
-    f"""
+    """
     Launches sessions as pods on a Kubernetes cluster.
     Assumes a running proxy server deployed on the cluster at `host` that forwards requests to individual session pods via:
 

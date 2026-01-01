@@ -215,9 +215,3 @@ class UITARS15_ThoughtAugmentedRolloutDataset(IterableDataset):
                 spans.append(cls.Span(start, i, role_id))
                 start, role_id = None, None
         return spans
-
-
-if __name__ == "__main__":
-    from transformers import AutoProcessor
-    processor = AutoProcessor.from_pretrained("ByteDance-Seed/UI-TARS-1.5-7B")
-    ds = UITARS15_ThoughtAugmentedRolloutDataset(processor, rollout_path="data/rollouts/20251219_augmented/row_002_augmented.json")
