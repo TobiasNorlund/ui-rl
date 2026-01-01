@@ -214,7 +214,7 @@ def run_rollouts(
                         futures[new_future] = next_rollout_id
                         next_rollout_id += 1
 
-                    break  # Only process one completion at a time
+                    break  # Only process one completion at a time, as futures is modified
 
         # Summary
         logger.info("="*60)

@@ -5,7 +5,7 @@ import hashlib
 from .runtime import CUASessionRuntime
 
 
-class TaskSpec(ABC):
+class TaskSpec[T: CUASessionRuntime](ABC):
 
     @abstractmethod
     def get_task_instruction(self) -> str:
@@ -15,7 +15,7 @@ class TaskSpec(ABC):
         pass
 
     @abstractmethod
-    def create_session(self, runtime: CUASessionRuntime):
+    def create_session(self, runtime: T):
         """
         Creates a session using `runtime.create_session(...)` for performing this task, and returns the session id string
         """

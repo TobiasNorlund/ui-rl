@@ -11,7 +11,7 @@ from ui_rl.agent import run_cua_rollout
 from ui_rl.models.uitars15.rollout import UITARS15_Rollout
 from ui_rl.runtime.docker import DockerSessionRuntime
 
-from task import SimpleDataEntryTaskSpec
+from task import SimpleDataEntryTaskSpec, rows_submitted_correctly
 
 
 def main(
@@ -124,17 +124,6 @@ class SimpleDataEntryRolloutWorker(RolloutWorker):
         except Exception as e:
             logging.error(f"Rollout {rollout_id} was stopped due to an error: {e}")
             return RolloutResult(rollout_id, task_spec, rollout.progress, e)
-
-
-def rows_submitted_correctly(result: RolloutResult) -> bool:
-    """
-    Checks if all the instructed spreadsheet rows were actually submitted
-    Note: In the spreadsheet, the first data row starts at no 2, but the "submitted_row_indices"
-          start from 0, so we need to subtract 2 from the instructed row when matching
-    """
-    assert isinstance(result.task_spec, SimpleDataEntryTaskSpec)
-    return result.error is None and result.progress is not None and \
-        set(result.progress["submitted_row_indices"]) == set([r-2 for r in result.task_spec.rows])
 
 
 def parse_strategy(strategy: str) -> RolloutStrategy:

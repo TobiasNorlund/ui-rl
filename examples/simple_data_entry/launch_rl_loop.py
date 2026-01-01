@@ -1,6 +1,6 @@
 from collections import defaultdict
 from pathlib import Path
-from rollout_uitars15_docker import SimpleDataEntryRolloutWorker
+from generate_rollouts import SimpleDataEntryRolloutWorker
 from launch_vllm import launch as launch_vllm, get_gpu_count
 
 import requests
