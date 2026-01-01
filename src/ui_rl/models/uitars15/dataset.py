@@ -56,7 +56,7 @@ class UITARS15_RolloutDataset(Dataset):
             Image.open(io.BytesIO(base64.b64decode(img_b64[img_b64.index(","):])))
             for img_b64 in seq.base64_images
         ]
-        image_inputs = self._processor.image_processor(images=images, return_tensors="pt")
+        image_inputs = self._processor.image_processor(images=images, return_tensors="pt")  # type: ignore
 
         # Construct labels to only train on completed message tokens
         labels = torch.zeros_like(input_ids).fill_(-100)
@@ -75,7 +75,7 @@ class UITARS15_RolloutDataset(Dataset):
         with open(rollout_path) as f:
             rollout = json.load(f)
 
-        sequences: list[self.TokenSequence] = []
+        sequences: list[UITARS15_RolloutDataset.TokenSequence] = []
         for completion in rollout["completions"]:
             token_ids = torch.LongTensor(completion["prompt_token_ids"] + completion["generated_token_ids"])
             base64_images = [
@@ -84,9 +84,9 @@ class UITARS15_RolloutDataset(Dataset):
                 for message_block in rollout["messages"][message_idx]["content"]
                 if type(message_block) == dict and message_block["type"] == "image_url"
             ]
-            sequences.append(self.TokenSequence(
+            sequences.append(UITARS15_RolloutDataset.TokenSequence(
                 token_ids=token_ids,
-                completions=[self.Span(
+                completions=[UITARS15_RolloutDataset.Span(
                     start=len(completion["prompt_token_ids"]), 
                     end=len(completion["prompt_token_ids"])+len(completion["generated_token_ids"])
                 )],
@@ -103,7 +103,7 @@ class UITARS15_RolloutDataset(Dataset):
             completion = seq.completions.pop(0)
             longest_seq.completions.append(completion)
 
-        return self.Rollout(
+        return UITARS15_RolloutDataset.Rollout(
             task_spec=rollout["task"],
             progress=rollout["progress"],
             sequences=[seq for seq in sequences if len(seq.completions) > 0]
@@ -211,6 +211,7 @@ class UITARS15_ThoughtAugmentedRolloutDataset(IterableDataset):
                 role_id = input_ids[i+1]
                 continue
             elif id == message_end_id:
+                assert start is not None and role_id is not None, "Should have found a start and role_id"
                 spans.append(cls.Span(start, i, role_id))
                 start, role_id = None, None
         return spans

@@ -24,7 +24,9 @@ class TaskSpec(ABC):
     def as_dict(self) -> dict:
         return vars(self)
 
-    def __eq__(self, other: "TaskSpec"):
+    def __eq__(self, other):
+        if not isinstance(other, TaskSpec):
+            return False
         return self.as_dict() == other.as_dict()
 
     def __hash__(self):

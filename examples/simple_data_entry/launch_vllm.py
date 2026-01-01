@@ -186,7 +186,7 @@ if __name__ == "__main__":
     args, vllm_args = parser.parse_known_args()
 
     if args.gpus:
-        gpus = int(args.gpus) if type(args.gpus) == str else [int(gpu) for gpu in args.gpus]
+        gpus = [int(gpu) for gpu in args.gpus]
     else:
         gpus = list(range(get_gpu_count()))
 
