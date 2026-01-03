@@ -71,6 +71,7 @@ SERVICE_TEMPLATE = """
     environment:
       - CUDA_VISIBLE_DEVICES=0
       - VLLM_HTTP_TIMEOUT_KEEP_ALIVE=60
+      - VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
 {mount}
@@ -147,15 +148,14 @@ def launch(
             mirror_locations=[f"""
         location = /mirror-{i} {{
             internal;
-            proxy_pass http://my-server-{i}:8000$request_uri;
+            proxy_pass http://vllm-gpu-{i}:8000/v1/load_lora_adapter;
         }}""" for i in gpus[1:]]
             f.write(NGINX_TEMPLATE.format(
                 server_list="\n        ".join(servers),
                 mirror_0=f"vllm-gpu-{gpus[0]}",
-                mirror_directives="\n            ".join(f"mirror /mirror-{i}" for i in gpus[1:]),
+                mirror_directives="\n            ".join(f"mirror /mirror-{i};" for i in gpus[1:]),
                 mirror_locations="\n".join(mirror_locations)
             ))
-            breakpoint()
         
         # Docker compose config
         mount_str = "\n".join(f"      - {m}" for m in mounts) if mounts else ""
@@ -180,9 +180,9 @@ def launch(
         )
         with open(os.path.join(tmpdir, "docker-compose.yml"), "w") as f:
             f.write(compose_content)
-        
+
         # Launch
-        proc = subprocess.Popen(["docker", "compose", "-f", os.path.join(tmpdir, "docker-compose.yml"), "up", "--detach" if detach else ""], env=os.environ.copy())
+        proc = subprocess.Popen(["docker", "compose", "-f", os.path.join(tmpdir, "docker-compose.yml"), "up"] + (["--detach"] if detach else []), env=os.environ.copy())
 
         yield proc
 
@@ -216,7 +216,7 @@ if __name__ == "__main__":
     parser.add_argument("--gpus", nargs="+")
     parser.add_argument("--model", default="ByteDance-Seed/UI-TARS-1.5-7B")
     parser.add_argument("--image", default="vllm/vllm-openai:latest")
-    parser.add_argument("--mount", nargs="+")
+    parser.add_argument("-v", "--mount", nargs="+")
     args, vllm_args = parser.parse_known_args()
 
     if args.gpus:
