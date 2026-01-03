@@ -3,6 +3,8 @@ import shlex
 import tempfile
 import subprocess
 import os
+import time
+import requests
 
 # --- Templates ---
 
@@ -20,6 +22,16 @@ http {{
     server {{
         listen 8000;
 
+        # Broadcaster for LoRA loading
+        location /v1/load_lora_adapter {{
+            # Main request goes to the first server
+            proxy_pass http://{mirror_0}:8000; 
+            
+            # Mirror to all other servers
+            {mirror_directives}
+        }}
+
+        # Standard Load Balanced traffic
         location / {{
             proxy_pass http://vllm_backend;
             proxy_set_header Host $host;
@@ -29,6 +41,9 @@ http {{
             chunked_transfer_encoding off;
             proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
         }}
+
+        # Internal Mirror Endpoints
+        {mirror_locations}
     }}
 }}
 """
@@ -129,9 +144,18 @@ def launch(
         # Nginx config
         with open(os.path.join(tmpdir, "nginx.conf"), "w") as f:
             servers = [f"server vllm-gpu-{i}:8000 max_fails=1 fail_timeout=5s;" for i in gpus]
+            mirror_locations=[f"""
+        location = /mirror-{i} {{
+            internal;
+            proxy_pass http://my-server-{i}:8000$request_uri;
+        }}""" for i in gpus[1:]]
             f.write(NGINX_TEMPLATE.format(
                 server_list="\n        ".join(servers),
+                mirror_0=f"vllm-gpu-{gpus[0]}",
+                mirror_directives="\n            ".join(f"mirror /mirror-{i}" for i in gpus[1:]),
+                mirror_locations="\n".join(mirror_locations)
             ))
+            breakpoint()
         
         # Docker compose config
         mount_str = "\n".join(f"      - {m}" for m in mounts) if mounts else ""
@@ -164,6 +188,18 @@ def launch(
 
         # Cleanup
         subprocess.run(["docker", "compose", "-f", os.path.join(tmpdir, "docker-compose.yml"), "down"])
+
+
+def await_vllm_ready():
+    while True:
+        try:
+            resp = requests.get("http://localhost:8000/health")
+            if resp.status_code == 200:
+                break
+            else:
+                time.sleep(5)
+        except:
+            time.sleep(5)
 
 
 def main(gpus: list[int], model_name: str, docker_image: str, mounts: list[str] | None, vllm_args: list[str]):
