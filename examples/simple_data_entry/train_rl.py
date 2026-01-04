@@ -7,6 +7,7 @@ import subprocess
 import logging
 import yaml
 import shutil
+import random
 import wandb
 
 from ui_rl.runner import FixedStrategy, NSuccessfulStrategy, run_rollouts
@@ -17,7 +18,7 @@ from launch_vllm import launch as launch_vllm, get_gpu_count, await_vllm_ready
 
 DEFAULT_VLLM_ARGS = ["--skip-mm-profiling", "--limit-mm-per-prompt", "{\"image\":10,\"video\":0}", "--max-num-seqs", "8", "--max-lora-rank", "64"]
 
-DEFAULT_MOUNTS = ["/tmp/vllm-cache:/root/.cache", "/tmp:/tmp"]
+DEFAULT_MOUNTS = ["/tmp/vllm-cache-{gpu_id}:/root/.cache", "/tmp:/tmp"]
 
 
 def main(
@@ -27,7 +28,6 @@ def main(
     checkpoint_output_dir: Path,
     eval_every_n_step: int,
     lora_path: str | None = None,
-    vllm_lora_path: str | None = None, 
     mounts: list[str] = DEFAULT_MOUNTS, 
     vllm_args: list[str] = DEFAULT_VLLM_ARGS
 ):
@@ -43,18 +43,20 @@ def main(
         ],
         force=True
     )
-    # Disable verbose logging from httpx
+    # Disable verbose logging from httpx and rollouts
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("ui_rl.agent").setLevel(logging.WARNING)
 
-    if vllm_lora_path is not None:
-        vllm_args += ["--enable-lora", "--lora-modules", f"lora_model={vllm_lora_path}"]
+    if lora_path is not None:
+        vllm_args += ["--enable-lora", "--lora-modules", f"lora_model={lora_path}"]
 
     base_model_name = "ByteDance-Seed/UI-TARS-1.5-7B"
 
     wandb.init(project="ui-rl", group="rl")
 
     step = 0
-    while True:
+    done_rows = []
+    while set(done_rows) != set(range(2, 102)):
         # =================================================================
         # STAGE 1: Launch vLLM on all gpus and generate a batch of rollouts
         # =================================================================
@@ -73,25 +75,30 @@ def main(
             # Decide what rollouts to run
             if step % eval_every_n_step == 0:
                 # Evalulation batch: Rollout all rows
+                logging.info(f"Generating EVALUTION rollout batch")
                 strategy = NSuccessfulStrategy(
                     tasks=[SimpleDataEntryTaskSpec(rows=[i]) for i in range(2, 102)],
                     min_successful=1,
                     min_attempts=5,
                     max_attempts=10,
-                    is_rollout_successful=rows_submitted_correctly
+                    is_rollout_success=rows_submitted_correctly
                 )
             else:
-                # Training batch: Rollout all rows that didn't have 100% success rate in the latest eval batch
+                # Training batch: Rollout 20 rows that didn't have 100% success rate in the latest eval batch
+                logging.info(f"Generating TRQAINING rollout batch")
+                non_done_rows = [i for i in range(2, 102) if i not in done_rows]
+                rows = random.sample(non_done_rows, k=20) if len(non_done_rows) > 20 else non_done_rows
                 strategy = NSuccessfulStrategy(
-                    tasks=[SimpleDataEntryTaskSpec(rows=[i]) for i in done_rows],
+                    tasks=[SimpleDataEntryTaskSpec(rows=[i]) for i in rows],
                     min_successful=1,
                     min_attempts=5,
                     max_attempts=10,
-                    is_rollout_successful=rows_submitted_correctly
+                    is_rollout_success=rows_submitted_correctly
                 )
 
-            logging.info(f"Starting generation of rollouts")
-            shutil.rmtree(rollout_output_dir)
+            
+            if rollout_output_dir.exists():
+                shutil.rmtree(rollout_output_dir)
             rollout_output_dir.mkdir(parents=True, exist_ok=True)
             worker = SimpleDataEntryRolloutWorker(
                 model_host="localhost:8000",
@@ -108,16 +115,16 @@ def main(
         # Rollout result
         n_success, n_tot = get_rollout_result(rollout_output_dir)
         success_rate = {row: n_success[row] / n_tot[row] for row in n_tot.keys()}
-        fig = go.Figure(data=[go.Bar(x=list(range(2, 102)), y=[success_rate[row] for row in range(2, 102)])])
+        fig = go.Figure(data=[go.Bar(x=list(success_rate.keys()), y=[success_rate[row] for row in success_rate.keys()])])
         if step % eval_every_n_step == 0:
             # Report eval metrics
             wandb.log({
-                "eval_success_rate": sum(success_rate.values()) / len/(success_rate),
+                "eval_success_rate": sum(success_rate.values()) / len(success_rate),
                 "eval_row_success_rate": wandb.Plotly(fig)
             })
 
             # Only train on rows that doesn't have 100% success rate
-            done_rows = [row for row in range(2, 102) if success_rate[row] < 1.0]
+            done_rows = [row for row in success_rate.keys() if success_rate[row] == 1.0]
             train_rollouts = [
                 str(path) 
                 for path in Path(rollout_output_dir).glob("row_*.json") \
@@ -126,7 +133,7 @@ def main(
         else:
             # Report training metrics
             wandb.log({
-                "success_rate": sum(success_rate.values()) / len/(success_rate),
+                "success_rate": sum(success_rate.values()) / len(success_rate),
                 "row_success_rate": wandb.Plotly(fig)
             })
 
@@ -149,8 +156,8 @@ def main(
 
         # checkpoint_output_dir now contains the newest lora
         lora_path = checkpoint_output_dir
-        vllm_lora_path = checkpoint_output_dir
 
+        step += 1
 
 
 def get_rollout_result(rollout_dir: Path) -> float:
@@ -171,7 +178,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-parallel-rollouts", type=int, default=20)
     parser.add_argument("--lora-path", default=None)
-    parser.add_argument("--vllm-lora-path", default=None)
     parser.add_argument("--eval-every", type=int, default=5)
     parser.add_argument("--mount", nargs="+", default=[])
     args, vllm_args = parser.parse_known_args()
@@ -183,7 +189,6 @@ if __name__ == "__main__":
         checkpoint_output_dir=Path("/tmp/checkpoint"),
         eval_every_n_step=args.eval_every,
         lora_path=args.lora_path,
-        vllm_lora_path=args.vllm_lora_path,
         mounts=DEFAULT_MOUNTS + args.mount,
         vllm_args=DEFAULT_VLLM_ARGS + vllm_args
     )

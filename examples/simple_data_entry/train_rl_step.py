@@ -7,7 +7,7 @@ from peft import LoraConfig, get_peft_model, PeftModel
 from tqdm import tqdm
 from pydantic import BaseModel
 import os
-from ui_rl.models.uitars15 import UITARS15_RolloutDataset
+from ui_rl.models.uitars15.dataset import UITARS15_RolloutDataset
 from utils import Qwen2_5_VLCollate
 
 

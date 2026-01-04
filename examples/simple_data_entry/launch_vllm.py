@@ -165,7 +165,7 @@ def launch(
                 id=i,
                 docker_image=docker_image,
                 model_name=model_name,
-                mount=mount_str,
+                mount=mount_str.format(gpu_id=i),
                 vllm_args=" ".join(shlex.quote(arg) for arg in vllm_args)
             )
         depends_on = [f"- vllm-gpu-{i}" for i in gpus]
