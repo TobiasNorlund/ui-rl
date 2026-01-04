@@ -32,7 +32,6 @@ class RolloutWorker(ABC):
         # Configure logging to use QueueHandler
         queue_handler = logging.handlers.QueueHandler(log_queue)
         root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
         root_logger.handlers = []
         root_logger.addHandler(queue_handler)
 

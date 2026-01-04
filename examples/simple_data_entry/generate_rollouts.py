@@ -1,17 +1,12 @@
 from collections import defaultdict
-import re
 import logging
 import wandb
 from datetime import datetime
 from pathlib import Path
-from queue import Queue
 
-from ui_rl import RolloutResult, RolloutStrategy, FixedStrategy, NSuccessfulStrategy, run_rollouts, RolloutWorker
-from ui_rl.agent import run_cua_rollout
-from ui_rl.models.uitars15.rollout import UITARS15_Rollout
-from ui_rl.runtime.docker import DockerSessionRuntime
+from ui_rl import FixedStrategy, NSuccessfulStrategy, run_rollouts
 
-from task import SimpleDataEntryTaskSpec, rows_submitted_correctly
+from simple_data_entry import SimpleDataEntryRolloutWorker, parse_strategy
 
 
 def main(
@@ -77,89 +72,7 @@ def main(
     )
     wandb.log({"result": wandb.plot.bar(table, "row", "success rate", title="Success Rate")})
     wandb.finish()
-
-
-class SimpleDataEntryRolloutWorker(RolloutWorker):
-    _runtime = None
-
-    def __init__(self, model_host: str, model_name: str, max_steps: int, output_dir: Path):
-        self._model_host = model_host
-        self._model_name = model_name
-        self._max_steps = max_steps
-        self._output_dir = output_dir
-
-    @classmethod
-    def init_worker(cls, log_queue: Queue):
-        super().init_worker(log_queue)
-
-        # Initialize docker runtime for this worker
-        cls._runtime = DockerSessionRuntime(httpx_client=cls._httpx_client, session_timeout=60)
-
-    def run(self, rollout_id: int, task_spec: SimpleDataEntryTaskSpec):
-        rollout = UITARS15_Rollout(
-            task_spec=task_spec,
-            model_host=self._model_host,
-            model_name=self._model_name,
-            httpx_client=self._httpx_client,
-            max_images_in_context=10,
-            max_tokens=200,
-            temperature=0.1
-        )
-        logging.info(f"Starting UITARS rollout for task: {task_spec}")
-        try:
-            run_cua_rollout(
-                task_spec=task_spec,
-                rollout=rollout,
-                runtime=self._runtime,
-                max_steps=self._max_steps,
-            )
-            logging.info(f"Rollout {rollout_id} completed")
-
-            # Save rollout
-            result = RolloutResult(rollout_id, task_spec, rollout.progress, None)
-            file_name = f"row_{task_spec.rows[0]:03d}_success_{rollout_id:04d}.json" if rows_submitted_correctly(result) else f"row_{task_spec.rows[0]:03d}_fail_{rollout_id:04d}.json"
-            rollout.save(self._output_dir / file_name)
-            return result
-
-        except Exception as e:
-            logging.error(f"Rollout {rollout_id} was stopped due to an error: {e}")
-            return RolloutResult(rollout_id, task_spec, rollout.progress, e)
-
-
-def parse_strategy(strategy: str) -> RolloutStrategy:
-    def _get_ids(ids: str):
-        all_ids = list[int]()
-        for id_group in ids.split(","):
-            if "-" in id_group:
-                start, stop = id_group.split("-")
-                all_ids += list(range(int(start), int(stop)+1))
-            else:
-                all_ids.append(int(id_group))
-        return all_ids
-
-    match strategy:
-        case s if (m := re.match(r"fixed\((?P<ids>\S+)\)", s)):
-            ids = _get_ids(m.group("ids"))
-
-            return FixedStrategy(tasks=[
-                SimpleDataEntryTaskSpec(rows=[id])
-                for id in ids
-            ])
-        case s if (m := re.match(r"nsuccessful\((?P<ids>\S+);(?P<min_successful>\d+);(?P<min_attempts>\d+);(?P<max_attempts>\d+)\)", s)):
-            ids = _get_ids(m.group("ids"))
-            return NSuccessfulStrategy(
-                tasks=[
-                    SimpleDataEntryTaskSpec(rows=[id])
-                    for id in ids
-                ], 
-                min_successful=int(m.group("min_successful")),
-                is_rollout_success=rows_submitted_correctly,
-                min_attempts=int(m.group("min_attempts")),
-                max_attempts=int(m.group("max_attempts"))
-            )
-        case _:
-            raise ValueError("Invalid strategy")
-
+            
 
 if __name__ == "__main__":
     import argparse

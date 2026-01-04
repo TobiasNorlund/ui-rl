@@ -1,113 +1,156 @@
-import torch
+from collections import defaultdict
+from pathlib import Path
+from generate_rollouts import SimpleDataEntryRolloutWorker
+from launch_vllm import launch as launch_vllm, get_gpu_count, await_vllm_ready
+
+import subprocess
+import logging
 import yaml
-from torch.utils.data import DataLoader
-from accelerate import Accelerator, DataLoaderConfiguration
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
-from peft import LoraConfig, get_peft_model, PeftModel
-from tqdm import tqdm
-from pydantic import BaseModel
-import os
-from ui_rl.models.uitars15 import UITARS15_RolloutDataset
-from utils import Qwen2_5_VLCollate
+import shutil
+import wandb
+
+from ui_rl.runner import FixedStrategy, NSuccessfulStrategy, run_rollouts
+from simple_data_entry import SimpleDataEntryTaskSpec
 
 
-class TrainConfig(BaseModel):
-    model_name: str
-    learning_rate: float
-    train_rollouts: list[str]
-    output_dir: str
-    lora_adapter: str | None = None
+DEFAULT_VLLM_ARGS = ["--skip-mm-profiling", "--limit-mm-per-prompt", "{\"image\":10,\"video\":0}", "--max-num-seqs", "8", "--max-lora-rank", "64"]
+
+DEFAULT_MOUNTS = ["/tmp/vllm-cache:/root/.cache", "/tmp:/tmp"]
 
 
-def reward_fn(rollout: UITARS15_RolloutDataset.Rollout):
-    if set(rollout.progress["submitted_row_indices"]) == set([r-2 for r in rollout.task_spec["rows"]]):
-        return 1.0
-    else:
-        return -1.0
+def main(
+    max_parallel_rollouts: int,
+    max_rollout_steps: int,
+    rollout_output_dir: Path,
+    checkpoint_output_dir: Path,
+    lora_path: str | None = None,
+    vllm_lora_path: str | None = None, 
+    mounts: list[str] = DEFAULT_MOUNTS, 
+    vllm_args: list[str] = DEFAULT_VLLM_ARGS
+):
+    """
+    Alternates between generating rollouts and training on all available GPUs.
+    This has the downside of not utilizing the GPU(s) fully, as there unavoidable is some idling between rollouts and training.
+    Should typically only be used on a single GPU.
+    """
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+        ],
+        force=True
+    )
+    # Disable verbose logging from httpx
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    if vllm_lora_path is not None:
+        vllm_args += ["--enable-lora", "--lora-modules", f"lora_model={vllm_lora_path}"]
+
+    base_model_name = "ByteDance-Seed/UI-TARS-1.5-7B"
+
+    wandb.init(project="ui-rl", group="rl")
+
+    while True:
+        # Launch vLLM on all gpus and generate a batch of rollouts
+        gpus = range(get_gpu_count())
+        with launch_vllm(
+            gpus=gpus, 
+            model_name=base_model_name,
+            mounts=mounts,
+            vllm_args=vllm_args,
+            detach=True
+        ):
+            # Wait until ready
+            logging.info("Starting vLLM...")
+            await_vllm_ready()
+
+            logging.info(f"Starting generation of rollouts using {max_parallel_rollouts} parallel workers")
+            strategy = FixedStrategy(
+                tasks=[SimpleDataEntryTaskSpec(rows=[2])] * 20,
+                rerun_on_error=True
+            )
+            shutil.rmtree(rollout_output_dir)
+            generate_rollout_batch(
+                model_name="lora_model" if lora_path is not None else base_model_name,
+                strategy=strategy,
+                max_parallel=max_parallel_rollouts,
+                max_steps=max_rollout_steps,
+                output_dir=rollout_output_dir,
+            )
+
+        success_rate = get_success_rate(rollout_output_dir)
+        wandb.log({"success_rate": success_rate})
+
+        # Launch training on this batch
+        with open("/tmp/train_config.yaml", "w") as f:
+            yaml.dump({
+                "model_name": base_model_name,
+                "learning_rate": 1e-5,
+                "lora_adapter": str(lora_path),
+                "output_dir": str(checkpoint_output_dir),
+                "train_rollouts": [
+                    str(path) for path in Path(rollout_output_dir).glob("row_*.json")
+                ]
+            }, f)
+        subprocess.run(["accelerate", "launch", "train_rl_step.py", "/tmp/train_config.yaml"])
+
+        # checkpoint_output_dir now contains the newest lora
+        lora_path = checkpoint_output_dir
+        vllm_lora_path = checkpoint_output_dir
 
 
-def main(config_file: str):
-    # Disable as we use multi-worker dataloader 
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-    with open(config_file) as f:
-        config = TrainConfig(**yaml.safe_load(f))
-    
-    print("Loading data...")
-    processor = AutoProcessor.from_pretrained(config.model_name)
-    train_ds = torch.utils.data.ConcatDataset(
-        [UITARS15_RolloutDataset(processor, path, reward_fn=reward_fn) for path in tqdm(config.train_rollouts)]
+def generate_rollout_batch(
+    model_name: str,
+    strategy: FixedStrategy | NSuccessfulStrategy,
+    max_parallel: int,
+    max_steps: int,
+    output_dir: Path
+):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    worker = SimpleDataEntryRolloutWorker(
+        model_host="localhost:8000",
+        model_name=model_name,
+        max_steps=max_steps,
+        output_dir=output_dir
+    )
+    run_rollouts(
+        strategy=strategy,
+        rollout_worker=worker,
+        max_parallel=max_parallel,
     )
 
-    collator = Qwen2_5_VLCollate(processor)
-    train_dataloader = DataLoader(train_ds, batch_size=1, shuffle=True, collate_fn=collator, num_workers=2)
 
-    # Load model
-    print("Loading model...")
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        config.model_name,
-        dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-    )
-    if config.lora_adapter is not None:
-        # Continue training from an existing LoRA adapter
-        print(f"Loading LoRA adapter from: {config.lora_adapter}")
-        model = PeftModel.from_pretrained(model, config.lora_adapter, is_trainable=True)
-    else:
-        # Start fresh with new LoRA adapter
-        lora_config = LoraConfig(
-            r=64,
-            lora_alpha=64,
-            target_modules=["q_proj", "v_proj"],
-            lora_dropout=0.0,
-            bias="none",
-            task_type="CAUSAL_LM"
-        )
-        model = get_peft_model(model, lora_config)
-
-    model.config.use_cache = False
-    model.gradient_checkpointing_enable()
-    model.enable_input_require_grads()
-    model.train()
-
-    # Load optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
-    optimizer_path = os.path.join(config.lora_adapter, "optimizer.pt")
-    if config.lora_adapter is not None and os.path.exists(optimizer_path):
-        optimizer.load_state_dict(torch.load(optimizer_path))
-
-    accelerator = Accelerator(
-        # Need dispatch_batches=False as "pixel_values" and "image_grid_thw" lacks batch dim
-        dataloader_config=DataLoaderConfiguration(dispatch_batches=False, even_batches=True),
-    )
-    model, optimizer, train_dataloader = accelerator.prepare(model, optimizer, train_dataloader)
-        
-    # Note: We only take a single gradient step over the whole dataset!
-    accelerator.gradient_accumulation_steps = len(train_dataloader)
-
-    if accelerator.is_main_process:
-        os.makedirs(config.output_dir, exist_ok=True)
-    accelerator.wait_for_everyone()
-
-    progress = tqdm(train_dataloader, disable=not accelerator.is_main_process)
-    for batch in progress:
-        with accelerator.accumulate(model):
-            outputs = model(**batch)
-            # Note: Assumes batch_size == 1
-            loss = outputs.loss * batch["reward"][0]
-            progress.set_postfix({"loss": f"{loss.item():.4f}"})
-            accelerator.backward(loss)
-            optimizer.step()
-            optimizer.zero_grad()
-
-    peft_model: PeftModel = accelerator.unwrap_model(model)
-    peft_model.save_pretrained(config.output_dir, safe_serialization=True)
-    torch.save(optimizer.state_dict(), os.path.join(config.output_dir, "optimizer.pt"))
+def get_success_rate(rollout_dir: Path) -> float:
+    # Compute success rate for each row
+    n_success = defaultdict(lambda: 0)
+    n_tot = defaultdict(lambda: 0)
+    for rollout in rollout_dir.glob("row_*.json"):
+        _, row, res, _ = rollout.name.split("_")
+        row = int(row)
+        n_tot[row] += 1
+        if res == "success":
+            n_success[row] += 1
+    return sum(n_success[row] / n_tot[row] for row in n_tot.keys()) / len(n_tot)
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("config")
-    args = parser.parse_args()
-    main(args.config)
+    parser.add_argument("--max-parallel-rollouts", type=int, default=20)
+    parser.add_argument("--lora-path", default=None)
+    parser.add_argument("--vllm-lora-path", default=None)
+    parser.add_argument("--mount", nargs="+", default=[])
+    args, vllm_args = parser.parse_known_args()
+
+    main(
+        max_parallel_rollouts=args.max_parallel_rollouts,
+        max_rollout_steps=20,
+        rollout_output_dir=Path("/tmp/rollouts"),
+        checkpoint_output_dir=Path("/tmp/checkpoint"),
+        lora_path=args.lora_path,
+        vllm_lora_path=args.vllm_lora_path,
+        mounts=DEFAULT_MOUNTS + args.mount,
+        vllm_args=DEFAULT_VLLM_ARGS + vllm_args
+    )
