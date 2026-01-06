@@ -1,4 +1,3 @@
-from collections import defaultdict
 from pathlib import Path
 import re
 import plotly.graph_objects as go
@@ -14,6 +13,7 @@ from ui_rl.runner import FixedStrategy, NSuccessfulStrategy, run_rollouts
 from generate_rollouts import SimpleDataEntryRolloutWorker
 from simple_data_entry import SimpleDataEntryTaskSpec, rows_submitted_correctly
 from launch_vllm import launch as launch_vllm, get_gpu_count, await_vllm_ready, DEFAULT_VLLM_ARGS, DEFAULT_VLLM_MOUNTS
+from utils import get_rollout_result
 
 
 def main(
@@ -153,19 +153,6 @@ def main(
         lora_path = checkpoint_output_dir
 
         step += 1
-
-
-def get_rollout_result(rollout_dir: Path) -> float:
-    # Compute success rate for each row
-    n_success = defaultdict(lambda: 0)
-    n_tot = defaultdict(lambda: 0)
-    for rollout in rollout_dir.glob("row_*.json"):
-        _, row, res, _ = rollout.name.split("_")
-        row = int(row)
-        n_tot[row] += 1
-        if res == "success":
-            n_success[row] += 1
-    return n_success, n_tot
 
 
 if __name__ == "__main__":

@@ -8,8 +8,10 @@ from peft import LoraConfig, PeftModel, get_peft_model
 import torch
 import json
 import time
+import wandb
 import queue
 import torch.multiprocessing as mp
+import plotly.graph_objects as go
 from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor, AutoProcessor
 from torch.utils.data import IterableDataset, DataLoader
 from transformers.trainer_utils import is_main_process
@@ -19,7 +21,7 @@ from watchdog.events import FileSystemEventHandler
 from rollout_worker import RolloutBatchRequest, rollout_worker
 from simple_data_entry import SimpleDataEntryTaskSpec
 from launch_vllm import DEFAULT_VLLM_ARGS, DEFAULT_VLLM_MOUNTS
-from utils import Qwen2_5_VLCollate
+from utils import Qwen2_5_VLCollate, get_rollout_result
 
 from ui_rl.models.uitars15.dataset import UITARS15_RolloutDataset
 from ui_rl.runner import FixedStrategy
@@ -40,6 +42,9 @@ def main(
     base_model_name = "ByteDance-Seed/UI-TARS-1.5-7B"
 
     accelerator = Accelerator()
+
+    if accelerator.is_main_process:
+        wandb.init(project="ui-rl", group="rl")
 
     rollout_worker_fn = rollout_worker if accelerator.is_main_process else nullcontext()
     with rollout_worker_fn(
@@ -133,11 +138,9 @@ def main(
                     # Note: Assumes batch_size == 1
                     loss = outputs.loss * batch["reward"][0]
                     
-                    # CRITICAL: Do NOT divide by steps here. 
+                    # Do NOT divide by steps here. 
                     # Accumulate the pure SUM of gradients.
                     accelerator.backward(loss) 
-                    
-                    # Optional: Track total loss for logging
                     running_loss += loss.item()
 
                 if is_last_batch:
@@ -156,17 +159,27 @@ def main(
             # Step and Zero
             optimizer.step()
             optimizer.zero_grad()
-            
+
             print(f"Update complete. Average Loss: {running_loss / counter.value}")
 
             step += 1
 
-            # Save checkpoint for vLLM
-            checkpoint_path = checkpoint_dir / f"step_{step}"
-            peft_model: PeftModel = accelerator.unwrap_model(model)
-            peft_model.save_pretrained(checkpoint_path, safe_serialization=True)
-            lora_adapter = checkpoint_path
+            if accelerator.is_main_process:
+                # Log to wandb
+                n_success, n_tot = get_rollout_result(rollouts_dir)
+                success_rate = {row: n_success[row] / n_tot[row] for row in n_tot.keys()}
+                fig = go.Figure(data=[go.Bar(x=list(success_rate.keys()), y=[success_rate[row] for row in success_rate.keys()])])
+                wandb.log({
+                    "success_rate": sum(success_rate.values()) / len(success_rate),
+                    "row_success_rate": wandb.Plotly(fig)
+                    "loss": running_loss / counter.value
+                })
 
+                # Save checkpoint for vLLM
+                checkpoint_path = checkpoint_dir / f"step_{step}"
+                peft_model: PeftModel = accelerator.unwrap_model(model)
+                peft_model.save_pretrained(checkpoint_path, safe_serialization=True)
+                lora_adapter = checkpoint_path
 
 
 def reward_fn(rollout: UITARS15_RolloutDataset.Rollout):
