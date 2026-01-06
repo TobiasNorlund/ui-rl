@@ -67,7 +67,7 @@ def main(
             await_vllm_ready()
 
             logging.info(f"Generating rollout batch")
-            strategy = FixedStrategy([SimpleDataEntryTaskSpec(rows=[i]) for i in list(range(2, 8) * 3)])
+            strategy = FixedStrategy([SimpleDataEntryTaskSpec(rows=[i]) for i in list(range(2, 8)) * 3])
             
             if rollout_output_dir.exists():
                 shutil.rmtree(rollout_output_dir)

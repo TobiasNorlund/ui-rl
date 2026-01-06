@@ -103,7 +103,7 @@ def main(
             if accelerator.is_main_process:
                 if rollouts_dir.exists():
                     shutil.rmtree(rollouts_dir)
-                strategy = FixedStrategy([SimpleDataEntryTaskSpec(rows=[i]) for i in list(range(2, 8) * 3)])
+                strategy = FixedStrategy([SimpleDataEntryTaskSpec(rows=[i]) for i in list(range(2, 8)) * 3])
                 rollout_batch_request = RolloutBatchRequest(
                     output_dir=rollouts_dir,
                     rollout_strategy=strategy,
