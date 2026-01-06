@@ -116,7 +116,7 @@ def main(
             # Start reading rollout data and accumulate gradients
             counter = mp.Value("i", 0)
             ds = LiveRolloutDataset(rollouts_dir, processor, reward_fn, counter, accelerator.process_index, accelerator.num_processes)
-            dl = DataLoader(ds, batch_size=1, collate_fn=collator, num_workers=1)
+            dl = DataLoader(ds, batch_size=1, collate_fn=collator, pin_memory=True, num_workers=1)
 
             try:
                 batch = next(dl)

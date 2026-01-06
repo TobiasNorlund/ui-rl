@@ -40,7 +40,7 @@ def main(config_file: str):
     )
 
     collator = Qwen2_5_VLCollate(processor)
-    train_dataloader = DataLoader(train_ds, batch_size=1, shuffle=True, collate_fn=collator, num_workers=2)
+    train_dataloader = DataLoader(train_ds, batch_size=1, collate_fn=collator, pin_memory=True, num_workers=2)
 
     # Load model
     print("Loading model...")
