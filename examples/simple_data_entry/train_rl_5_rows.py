@@ -87,7 +87,7 @@ def main(
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
         optimizer_path = lora_adapter / "optimizer.pt"
         if lora_adapter is not None and optimizer_path.exists():
-            optimizer.load_state_dict(torch.load(optimizer_path))
+            optimizer.load_state_dict(torch.load(optimizer_path, map_location='cpu'))
 
         model, optimizer = accelerator.prepare(model, optimizer)
 

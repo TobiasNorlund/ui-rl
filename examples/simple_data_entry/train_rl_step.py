@@ -74,7 +74,7 @@ def main(config_file: str):
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
     optimizer_path = os.path.join(config.lora_adapter, "optimizer.pt")
     if config.lora_adapter is not None and os.path.exists(optimizer_path):
-        optimizer.load_state_dict(torch.load(optimizer_path))
+        optimizer.load_state_dict(torch.load(optimizer_path, map_location='cpu'))
 
     accelerator = Accelerator(
         # Need dispatch_batches=False as "pixel_values" and "image_grid_thw" lacks batch dim
