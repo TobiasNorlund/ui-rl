@@ -50,8 +50,7 @@ def main(
     wandb.init(project="ui-rl", group="rl")
 
     step = 0
-    done_rows = []
-    while set(done_rows) != set(range(2, 102)):
+    while True:
         # =================================================================
         # STAGE 1: Launch vLLM on all gpus and generate a batch of rollouts
         # =================================================================
@@ -67,30 +66,8 @@ def main(
             logging.info("Starting vLLM...")
             await_vllm_ready()
 
-            # Decide what rollouts to run
-            if step % eval_every_n_step == 0:
-                # Evalulation batch: Rollout all rows
-                logging.info(f"Generating EVALUTION rollout batch")
-                strategy = NSuccessfulStrategy(
-                    tasks=[SimpleDataEntryTaskSpec(rows=[i]) for i in range(2, 102)],
-                    min_successful=1,
-                    min_attempts=5,
-                    max_attempts=10,
-                    is_rollout_success=rows_submitted_correctly
-                )
-            else:
-                # Training batch: Rollout 20 rows that didn't have 100% success rate in the latest eval batch
-                logging.info(f"Generating TRAINING rollout batch")
-                non_done_rows = [i for i in range(2, 102) if i not in done_rows]
-                rows = random.sample(non_done_rows, k=20) if len(non_done_rows) > 20 else non_done_rows
-                strategy = NSuccessfulStrategy(
-                    tasks=[SimpleDataEntryTaskSpec(rows=[i]) for i in rows],
-                    min_successful=1,
-                    min_attempts=5,
-                    max_attempts=10,
-                    is_rollout_success=rows_submitted_correctly
-                )
-
+            logging.info(f"Generating rollout batch")
+            strategy = FixedStrategy([SimpleDataEntryTaskSpec(rows=[i]) for i in list(range(2, 8) * 3)])
             
             if rollout_output_dir.exists():
                 shutil.rmtree(rollout_output_dir)
@@ -111,29 +88,14 @@ def main(
         n_success, n_tot = get_rollout_result(rollout_output_dir)
         success_rate = {row: n_success[row] / n_tot[row] for row in n_tot.keys()}
         fig = go.Figure(data=[go.Bar(x=list(success_rate.keys()), y=[success_rate[row] for row in success_rate.keys()])])
-        if step % eval_every_n_step == 0:
-            # Report eval metrics
-            wandb.log({
-                "eval_success_rate": sum(success_rate.values()) / len(success_rate),
-                "eval_row_success_rate": wandb.Plotly(fig)
-            })
+        # Report training metrics
+        wandb.log({
+            "success_rate": sum(success_rate.values()) / len(success_rate),
+            "row_success_rate": wandb.Plotly(fig)
+        })
 
-            # Only train on rows that doesn't have 100% success rate
-            done_rows = [row for row in success_rate.keys() if success_rate[row] == 1.0]
-            train_rollouts = [
-                str(path) 
-                for path in Path(rollout_output_dir).glob("row_*.json") \
-                    if int(re.search(r"row_(\d+)", path.name).group(1)) not in done_rows
-            ]
-        else:
-            # Report training metrics
-            wandb.log({
-                "success_rate": sum(success_rate.values()) / len(success_rate),
-                "row_success_rate": wandb.Plotly(fig)
-            })
-
-            # Train on all rollouts
-            train_rollouts = [str(path) for path in Path(rollout_output_dir).glob("row_*.json")]
+        # Train on all rollouts
+        train_rollouts = [str(path) for path in Path(rollout_output_dir).glob("row_*.json")]
 
 
         # ======================================
