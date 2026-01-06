@@ -13,12 +13,7 @@ import wandb
 from ui_rl.runner import FixedStrategy, NSuccessfulStrategy, run_rollouts
 from generate_rollouts import SimpleDataEntryRolloutWorker
 from simple_data_entry import SimpleDataEntryTaskSpec, rows_submitted_correctly
-from launch_vllm import launch as launch_vllm, get_gpu_count, await_vllm_ready
-
-
-DEFAULT_VLLM_ARGS = ["--skip-mm-profiling", "--limit-mm-per-prompt", "{\"image\":10,\"video\":0}", "--max-num-seqs", "8", "--max-lora-rank", "64"]
-
-DEFAULT_MOUNTS = ["/tmp/vllm-cache-{gpu_id}:/root/.cache", "/tmp:/tmp"]
+from launch_vllm import launch as launch_vllm, get_gpu_count, await_vllm_ready, DEFAULT_VLLM_ARGS, DEFAULT_VLLM_MOUNTS
 
 
 def main(
@@ -28,7 +23,7 @@ def main(
     checkpoint_output_dir: Path,
     eval_every_n_step: int,
     lora_path: str | None = None,
-    mounts: list[str] = DEFAULT_MOUNTS, 
+    mounts: list[str] = DEFAULT_VLLM_MOUNTS, 
     vllm_args: list[str] = DEFAULT_VLLM_ARGS
 ):
     """
@@ -85,7 +80,7 @@ def main(
                 )
             else:
                 # Training batch: Rollout 20 rows that didn't have 100% success rate in the latest eval batch
-                logging.info(f"Generating TRQAINING rollout batch")
+                logging.info(f"Generating TRAINING rollout batch")
                 non_done_rows = [i for i in range(2, 102) if i not in done_rows]
                 rows = random.sample(non_done_rows, k=20) if len(non_done_rows) > 20 else non_done_rows
                 strategy = NSuccessfulStrategy(
@@ -189,6 +184,6 @@ if __name__ == "__main__":
         checkpoint_output_dir=Path("/tmp/checkpoint"),
         eval_every_n_step=args.eval_every,
         lora_path=args.lora_path,
-        mounts=DEFAULT_MOUNTS + args.mount,
+        mounts=DEFAULT_VLLM_MOUNTS + args.mount,
         vllm_args=DEFAULT_VLLM_ARGS + vllm_args
     )
