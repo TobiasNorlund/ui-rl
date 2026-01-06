@@ -7,7 +7,7 @@ import time
 import requests
 
 
-DEFAULT_VLLM_ARGS = ["--skip-mm-profiling", "--limit-mm-per-prompt", "{\"image\":10,\"video\":0}", "--max-num-seqs", "8", "--max-lora-rank", "64"]
+DEFAULT_VLLM_ARGS = ["--skip-mm-profiling", "--limit-mm-per-prompt", "{\"image\":10,\"video\":0}", "--max-num-seqs", "8", "--enable-lora", "--max-lora-rank", "64"]
 DEFAULT_VLLM_MOUNTS = ["/tmp/vllm-cache-{gpu_id}:/root/.cache", "/tmp:/tmp"]
 
 

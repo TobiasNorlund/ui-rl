@@ -34,6 +34,7 @@ def run_rollout_worker(
         level=logging.INFO,
         format='%(asctime)s %(levelname)s %(message)s',
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("ui_rl.agent").setLevel(logging.WARNING)
 
     with launch_vllm(
@@ -56,11 +57,15 @@ def run_rollout_worker(
 
                 # Optionally load lora
                 if rollout_batch_request.lora_name is not None and rollout_batch_request.lora_path is not None:
-                    logging.info(f"Loading lora: {rollout_batch_request.lora_name}")
-                    requests.post("http://localhost:8000/v1/load_lora_adapter", data={
-                        "lora_name": rollout_batch_request.lora_name,
-                        "lora_path": rollout_batch_request.lora_path
-                    })
+                    logging.info(f"Loading lora: {rollout_batch_request.lora_name} from path {rollout_batch_request.lora_path}")
+                    resp = requests.post(
+                        "http://localhost:8000/v1/load_lora_adapter", 
+                        json={
+                            "lora_name": rollout_batch_request.lora_name,
+                            "lora_path": str(rollout_batch_request.lora_path)
+                        }
+                    )
+                    resp.raise_for_status()
 
                 worker = SimpleDataEntryRolloutWorker(
                     model_host="localhost:8000",
@@ -89,7 +94,7 @@ def rollout_worker(
     vllm_mounts: list[str],
     vllm_args: list[str]
 ):
-    task_queue = Queue[RolloutBatchRequest]()
+    task_queue = Queue()
     proc = Process(target=run_rollout_worker, kwargs={
         "gpus": gpus,
         "model_name": model_name,

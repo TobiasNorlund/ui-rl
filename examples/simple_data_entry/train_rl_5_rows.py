@@ -1,6 +1,6 @@
-from contextlib import nullcontext
 import os
 from pathlib import Path
+from contextlib import contextmanager
 import shutil
 from typing import Callable
 from accelerate import Accelerator
@@ -14,7 +14,6 @@ import torch.multiprocessing as mp
 import plotly.graph_objects as go
 from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor, AutoProcessor
 from torch.utils.data import IterableDataset, DataLoader
-from transformers.trainer_utils import is_main_process
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -46,7 +45,7 @@ def main(
     if accelerator.is_main_process:
         wandb.init(project="ui-rl", group="rl")
 
-    rollout_worker_fn = rollout_worker if accelerator.is_main_process else nullcontext()
+    rollout_worker_fn = rollout_worker if accelerator.is_main_process else nullcontext
     with rollout_worker_fn(
         gpus=vllm_gpus,
         model_name=base_model_name,
@@ -103,30 +102,39 @@ def main(
             if accelerator.is_main_process:
                 if rollouts_dir.exists():
                     shutil.rmtree(rollouts_dir)
+                rollouts_dir.mkdir(parents=True, exist_ok=True)
                 strategy = FixedStrategy([SimpleDataEntryTaskSpec(rows=[i]) for i in list(range(2, 7)) * 3])
                 rollout_batch_request = RolloutBatchRequest(
                     output_dir=rollouts_dir,
                     rollout_strategy=strategy,
+                    max_steps=20,
+                    model_name=None,
                     lora_name=f"step_{step}",
                     lora_path=lora_adapter
                 )
                 task_queue.put(rollout_batch_request)
 
+            accelerator.wait_for_everyone()
 
             # Start reading rollout data and accumulate gradients
             counter = mp.Value("i", 0)
             ds = LiveRolloutDataset(rollouts_dir, processor, reward_fn, counter, accelerator.process_index, accelerator.num_processes)
             dl = DataLoader(ds, batch_size=1, collate_fn=collator, pin_memory=True, num_workers=1)
-
+            dl_iter = iter(dl)
             try:
-                batch = next(dl)
+                batch = next(dl_iter)
+                if accelerator.is_main_process:
+                    print("Got first batch")
             except StopIteration:
                 raise RuntimeError("Did not receive any rollouts")
 
+            running_loss = 0.0
             while True:
                 try:
                     # Try to fetch the NEXT batch immediately
-                    next_batch = next(dl)
+                    next_batch = next(dl_iter)
+                    if accelerator.is_main_process:
+                        print("Got next batch")
                     is_last_batch = False
                 except StopIteration:
                     is_last_batch = True
@@ -160,19 +168,18 @@ def main(
             optimizer.step()
             optimizer.zero_grad()
 
-            print(f"Update complete. Average Loss: {running_loss / counter.value}")
-
             step += 1
 
             if accelerator.is_main_process:
+                print(f"Step {step-1} complete")
+
                 # Log to wandb
                 n_success, n_tot = get_rollout_result(rollouts_dir)
                 success_rate = {row: n_success[row] / n_tot[row] for row in n_tot.keys()}
                 fig = go.Figure(data=[go.Bar(x=list(success_rate.keys()), y=[success_rate[row] for row in success_rate.keys()])])
                 wandb.log({
                     "success_rate": sum(success_rate.values()) / len(success_rate),
-                    "row_success_rate": wandb.Plotly(fig)
-                    "loss": running_loss / counter.value
+                    "row_success_rate": wandb.Plotly(fig),
                 })
 
                 # Save checkpoint for vLLM
@@ -221,24 +228,22 @@ class LiveRolloutDataset(IterableDataset):
         observer.schedule(event_handler, str(self.watch_dir), recursive=False)
         observer.start()
         
-        print(f"(rank {self.rank}) Worker {torch.utils.data.get_worker_info().id} started watching {self.watch_dir}")
+        #print(f"(rank {self.rank}) Worker {torch.utils.data.get_worker_info().id} started watching {self.watch_dir}")
 
         try:
             while True:
                 filepath = file_queue.get()
                 if filepath.name == ".done":
-                    print(f"(rank {self.rank}) Received .done, exiting...")
                     break
                 elif filepath.name.endswith(".json"):
                     self._wait_for_file_completion(filepath)
-                    print(f"(rank {self.rank}) process file: {filepath}")
                     rollout_ds = UITARS15_RolloutDataset(self.processor, str(filepath), self.reward_fn)
                     self.global_len_counter.value += len(rollout_ds)
                     rank_offset = hash(filepath.name) % self.world_size
-                    for i, ex in enumerate(rollout_ds):
+                    for i in range(len(rollout_ds)):
                         # Ensure only one rank gets each example
                         if (i + rank_offset) % self.world_size == self.rank:
-                            yield ex
+                            yield rollout_ds[i]
         finally:
             # Clean up thread when the worker dies
             observer.stop()
@@ -264,14 +269,19 @@ class FileQueueHandler(FileSystemEventHandler):
             self.q.put(Path(event.src_path))
 
 
+@contextmanager
+def nullcontext(**kwargs):
+    yield
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--vllm-gpus", nargs="+", type=int)
     parser.add_argument("--max-parallel-rollouts", type=int)
-    parser.add_argument("--vllm-mount", nargs="+")
+    parser.add_argument("--vllm-mounts", nargs="+", default=[])
     parser.add_argument("--lora-adapter", type=Path)
-    parser.add_argument("--rollout-dir", type=Path, default=Path("/tmp/rollouts"))
+    parser.add_argument("--rollouts-dir", type=Path, default=Path("/tmp/rollouts"))
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("/tmp/checkpoints"))
 
     args, vllm_args = parser.parse_known_args()
