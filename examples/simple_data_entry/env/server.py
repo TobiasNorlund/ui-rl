@@ -24,7 +24,7 @@ start_time = datetime.now()
 
 @app.get("/")
 async def root():
-    return Response(content=f"""UI Verifiers Session Server
+    return Response(content=f"""ui-rl Session Server
 Session Type: Simple Data Entry
 Start time: {start_time}
 Duration: {datetime.now() - start_time}
