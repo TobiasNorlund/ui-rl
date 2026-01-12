@@ -10,3 +10,13 @@ This allows you to focus more on building verifiable tasks and optimizing model 
 
 `ui-rl` currently supports [UITARS 1.5 7B](https://huggingface.co/ByteDance-Seed/UI-TARS-1.5-7B), with more models coming. 
 
+
+## Installation
+
+```bash
+pip install ui-rl
+```
+
+## How to use
+
+TODO
