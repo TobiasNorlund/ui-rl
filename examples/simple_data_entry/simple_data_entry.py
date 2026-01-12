@@ -24,7 +24,7 @@ class SimpleDataEntryTaskSpec(TaskSpec[DockerSessionRuntime]):
 Note: You may need to scroll to make the row visible in the sheet.
 The form has to be submitted separately for each row. When the form has been submitted, return to the form to submit the next row. 
 Submit a row by selecting each cell individually, copy its content by sending keys "ctrl+c", select the target form text input and paste using "ctrl+v".
-Finally, click "Skicka" to submit the form, and continue with the next row. Only finish when all rows have been successfully submitted"""
+Finally, submit the form and continue with the next row. Only finish when all rows have been successfully submitted"""
 
     def create_session(self, runtime: DockerSessionRuntime) -> str:
         return runtime.create_session(
