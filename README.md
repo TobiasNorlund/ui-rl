@@ -12,11 +12,12 @@ This allows you to focus more on building verifiable tasks and optimizing model 
 
 ## The Why
 
-Computer Use deployments require very robust model performance. You typically want (very close to) 100% success rate, and never any fatal mistakes. Few of today's models offer that reliability for arbitrary tasks.
+Computer Use deployments require very robust model performance. You typically want (very close to) 100% success rate on your specific task(s), and never any fatal mistakes. Even the best models seldom offer that reliability for arbitrary tasks.
 The best way to achieve such high reliability is to do task-specific fine-tuning. 
 
 However, performing such fine-tuning is complex. A typical pipeline consists of starting from an open source model, performing some Supervised Fine-Tuning (SFT) until a decent success rate is achieved, and finally use Reinforcement Learning from Verified Reward (RLVR) for the last-mile performance boost.
-Getting all this up-and-running requires significant setup, and is where `ui-rl` aims to simplify.
+
+Getting all this up-and-running requires significant setup, and is where `ui-rl` aims to simplify"."
 
 
 ## Key features
@@ -36,8 +37,8 @@ pip install ui-rl
 
 ## Use Case: Generate a rollout for a custom UI task
 
-1. Start by building a containerized task environment. For an example, see [examples/simple_data_entry/env](examples/simple_data_entry/env)
-2. Implement a `TaskSpec` that specifies the task prompt, and how to run it (e.g. in a local docker container).  
+1. Start by building a containerized task environment. For an example, see [examples/simple_data_entry/env](examples/simple_data_entry/env) or [this blog post](https://medium.com/@tobias.norlund/does-computer-use-actually-make-sense-60f0449e3770) for a thorough walkthrough
+2. Implement a `TaskSpec` that specifies the task prompt, and how to run it using a so called `SessionRuntime` (local docker container in this case).  
 
 ```python
 from ui_rl.task import TaskSpec
@@ -61,7 +62,7 @@ Finally, submit the form and continue with the next row. Only finish when all ro
 
 ```
 
-3. Start vLLM to use as inference engine. We will use the [UITARS 1.5 7B](https://huggingface.co/ByteDance-Seed/UI-TARS-1.5-7B) model.
+3. Start vLLM to use as inference engine, or use a cloud provider. We will use the [UITARS 1.5 7B](https://huggingface.co/ByteDance-Seed/UI-TARS-1.5-7B) model.
 
 **Note:** You probably need a GPU with at least 40GB of VRAM for running this model
 
@@ -79,7 +80,7 @@ from ui_rl.models.uitars15.rollout import UITARS15_Rollout
 # Create shared httpx client for communicating with vLLM and task environment
 httpx_client = httpx.Client()
 
-# Create a task spec for submitting row no 2 from the spreadsheet
+# Create a task spec for submitting row no 2 (the first data row) from the spreadsheet
 task_spec = SimpleDataEntryTaskSpec(rows=[2])
 
 # Create rollout object
@@ -178,14 +179,15 @@ Which will print something like:
 
 Here, there are some things worth noting:
 
- - The dataset groups together LLM completions that extends the same sequence. If all rollout turns keeps extending the same token sequence, then `len(ds)` will be 1.
+ - The dataset iterates over _sequences_, but groups together LLM completions that extends the same sequence. If all LLM completions keep extending the same token sequence, then `len(ds)` will be 1.
  - The `labels` are constructed such that only generated tokens are trained.
 
 Finally, a `reward_fn` can be provided in the constructor to support RL training, see code for more details:
 
 ```python
 def reward_fn(rollout: UITARS15_RolloutDataset.Rollout) -> float:
-    if rollout.task_spec["rows"] == rollout.progress["submitted_row_indices"]:
+    # Minor detail: The data starts on row 2 in the spreadsheet in this example
+    if [row - 2 for row in rollout.task_spec["rows"]] == rollout.progress["submitted_row_indices"]:
         return 1.0
     else:
         return -1.0
