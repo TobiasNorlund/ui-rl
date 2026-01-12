@@ -38,7 +38,7 @@ pids+=($!)
 (ulimit -n 1024; x11vnc -display :1 -forever) &
 pids+=($!)
 
-# Start openbox
+# Start mutter
 XDG_SESSION_TYPE=x11 mutter --replace --sm-disable &
 pids+=($!)
 

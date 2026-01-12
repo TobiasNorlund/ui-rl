@@ -1,23 +1,12 @@
-# UI Reinforcement Learning
+![ui-rl](assets/uirl.svg)
 
-`ui-rl` is a library for fine-tuning Computer Use agent models.
-It allows training on verifiable UI tasks to improve model reliability on targeted domains and tasks.
+---
 
-## Example: Generate rollouts for Simple Data Entry task
+[![CI](https://github.com/TobiasNorlund/ui-rl/actions/workflows/ci.yml/badge.svg)](https://github.com/TobiasNorlund/ui-rl/actions/workflows/ci.yml)
 
-```bash
-cd examples/simple_data_entry
+`ui-rl` is a **library for fine-tuning Computer Use agent models**.
+It provides utilities for scalable training on verifiable UI tasks to improve model reliability on targeted domains and tasks.
+This allows you to focus more on building verifiable tasks and optimizing model performance, and less on boilerplate code such as agent loops, rollout generations, torch data loading etc.
 
-# 1. Build Simple Data Entry docker image
-(cd env && make build)
+`ui-rl` currently supports [UITARS 1.5 7B](https://huggingface.co/ByteDance-Seed/UI-TARS-1.5-7B), with more models coming. 
 
-# 2. Start vLLM model host on each available GPUs (optionally with lora checkpoint preloaded)
-#    Note: Requires docker compose
-uv run launch_vllm.py --limit-mm-per-prompt '{"image":10, "video":0}' --max-num-seqs 8 \
-    --extra-mount "$(realpath ../../)/data/checkpoints:/app/models" --enable-lora --max-lora-rank 64 --lora-modules 20251210_195352/step_2000=/app/models/20251210_195352/step_2000
-
-# 3. Once vLLM is ready, start generating rollouts
-uv run rollout_uitars15_docker.py --vllm-host localhost:8000 --strategy "nsuccessful(2-101;1;10;100)" --model-name step_2000 --max-parallel 120
-```
-
-```
