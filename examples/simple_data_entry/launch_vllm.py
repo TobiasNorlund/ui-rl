@@ -6,6 +6,11 @@ import os
 import time
 import requests
 
+
+DEFAULT_VLLM_ARGS = ["--skip-mm-profiling", "--limit-mm-per-prompt", "{\"image\":10,\"video\":0}", "--max-num-seqs", "8", "--max-lora-rank", "64"]
+DEFAULT_VLLM_MOUNTS = ["/tmp/vllm-cache-{gpu_id}:/root/.cache", "/tmp:/tmp"]
+
+
 # --- Templates ---
 
 NGINX_TEMPLATE = """
@@ -165,7 +170,7 @@ def launch(
                 id=i,
                 docker_image=docker_image,
                 model_name=model_name,
-                mount=mount_str,
+                mount=mount_str.format(gpu_id=i),
                 vllm_args=" ".join(shlex.quote(arg) for arg in vllm_args)
             )
         depends_on = [f"- vllm-gpu-{i}" for i in gpus]

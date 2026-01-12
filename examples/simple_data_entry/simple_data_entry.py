@@ -58,7 +58,7 @@ class SimpleDataEntryRolloutWorker(RolloutWorker):
             max_tokens=200,
             temperature=0.1
         )
-        logging.info(f"Starting UITARS rollout for task: {task_spec}")
+        logging.info(f"Starting rollout for task: {task_spec}")
         try:
             run_cua_rollout(
                 task_spec=task_spec,

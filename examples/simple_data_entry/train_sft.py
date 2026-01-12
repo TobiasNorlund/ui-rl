@@ -13,7 +13,7 @@ import random
 import os
 from datetime import datetime
 
-from ui_rl.models.uitars15 import UITARS15_RolloutDataset, UITARS15_ThoughtAugmentedRolloutDataset
+from ui_rl.models.uitars15.dataset import UITARS15_RolloutDataset, UITARS15_ThoughtAugmentedRolloutDataset
 from utils import Qwen2_5_VLCollate
 
 
@@ -226,7 +226,7 @@ class SetGlobalUniqueRandomSeedWrapper(IterableDataset):
 
     def __iter__(self):
         if hasattr(self._iterable, "_random_seed"):
-            # 1. Get distributed rank and world size
+            # 1. Get distributed rank
             if torch.distributed.is_initialized():
                 rank = torch.distributed.get_rank()
             else:
