@@ -34,8 +34,12 @@ Getting all this up-and-running requires significant setup, and is where `ui-rl`
 pip install ui-rl
 ```
 
+## How to use:
 
-## Use Case: Generate a rollout for a custom UI task
+We exemplify usage of `ui-rl` via common use cases:
+
+
+### Use Case: Generate a rollout for a custom UI task
 
 1. Start by building a containerized task environment. For an example, see [examples/simple_data_entry/env](examples/simple_data_entry/env) or [this blog post](https://medium.com/@tobias.norlund/does-computer-use-actually-make-sense-60f0449e3770) for a thorough walkthrough
 2. Implement a `TaskSpec` that specifies the task prompt, and how to run it using a so called `SessionRuntime` (local docker container in this case).  
@@ -62,13 +66,12 @@ Finally, submit the form and continue with the next row. Only finish when all ro
 
 ```
 
-3. Start vLLM to use as inference engine, or use a cloud provider. We will use the [UITARS 1.5 7B](https://huggingface.co/ByteDance-Seed/UI-TARS-1.5-7B) model.
+3. Start vLLM to use as inference engine, or use a cloud hosting. We will use the [UITARS 1.5 7B](https://huggingface.co/ByteDance-Seed/UI-TARS-1.5-7B) model.
 
 **Note:** You probably need a GPU with at least 40GB of VRAM for running this model
 
 ```bash
-# TODO
-docker run ...
+docker run -it --rm --gpus all -v ~/.cache/huggingface:/root/.cache/huggingface -p 8000:8000 vllm/vllm-openai:latest "ByteDance-Seed/UI-TARS-1.5-7B" --limit-mm-per-prompt '{"image":10,"video":0}'
 ```
 
 4. Instantiate the TaskSpec, and create a rollout object to manage and record the CUA model calls:
@@ -120,7 +123,7 @@ except Exception as e:
     print(f"Error when generating rollout: {e}")
 ```
 
-**Note:** A successful rollout has a "progress", a dict specifying task-specific progress data. In our example, it contains:
+**Note:** A successful rollout has a "progress", a dict specifying task-specific progress data. For our example task, it contains:
 
 ```json
 {
@@ -132,7 +135,7 @@ except Exception as e:
 This can later be used to compute a reward during RL training. 
 
 
-## Use Case: Train on rollouts
+### Use Case: Train on rollouts
 
 Saved rollouts can be used directly for training. 
 Perhaps the simplest case is when doing [Rejection Sampling](https://rlhfbook.com/c/10-rejection-sampling).
@@ -179,7 +182,7 @@ Which will print something like:
 
 Here, there are some things worth noting:
 
- - The dataset iterates over _sequences_, but groups together LLM completions that extends the same sequence. If all LLM completions keep extending the same token sequence, then `len(ds)` will be 1.
+ - The dataset iterates over _sequences_, all unique token sequences used by the agent throughout the rollout. This means that LLM completions that extends the same sequence is represented by a single sequence. If all LLM completions keep extending the same token sequence, then `len(ds)` will be 1.
  - The `labels` are constructed such that only generated tokens are trained.
 
 Finally, a `reward_fn` can be provided in the constructor to support RL training, see code for more details:
@@ -196,5 +199,90 @@ ds = UITARS15_RolloutDataset(
     processor=processor,
     rollout_path="rollout_1.json",
     reward_fn=reward_fn
+)
+```
+
+The reward is returned when iterating over the dataset.
+
+
+### Use case: Generate multiple rollouts in parallel
+
+`ui-rl` supports utilities for generating rollouts in parallel via `run_rollouts(...)`. It takes three arguments:
+
+ - `strategy: ui_rl.RolloutStrategy`: Defines what task specs to run and in what order
+ - `rollout_worker: ui_rl.RolloutWorker`: Defines how to run a rollout (e.g. creating a rollout object followed by `run_cua_agent(...)`, like above). 
+ - `max_parallel: int`: How many rollouts to run in parallel.
+
+Under the hood, `run_rollouts()` uses a `ProcessPoolExecutor` to run the rollout workers concurrently. We start by creating a `RolloutWorker` for our task and model: 
+
+```python
+import logging
+from ui_rl import RolloutWorker, RolloutResult
+
+class SimpleDataEntryRolloutWorker(RolloutWorker):
+    _runtime = None
+
+    @classmethod
+    def init_worker(cls, log_queue: Queue):
+        # init_worker is run at init for each process pool worker
+
+        # Configures logging for multiprocessing, and creates a reusable 
+        # httpx client for each process worker at cls._httpx_client
+        super().init_worker(log_queue)
+
+        # Initialize a docker runtime for this worker
+        cls._runtime = DockerSessionRuntime(httpx_client=cls._httpx_client, session_timeout=60)
+
+    def run(self, rollout_id: int, task_spec: SimpleDataEntryTaskSpec) -> RolloutResult:
+        # `run` takes a rollout_id and task_spec, executes a rollout and returns a `RolloutResult` 
+        # It is executed for each task_spec returned by the rollout strategy
+
+        rollout = UITARS15_Rollout(
+            task_spec=task_spec,
+            model_host="localhost:8000",
+            model_name="ByteDance-Seed/UI-TARS-1.5-7B",
+            httpx_client=self._httpx_client,
+            max_images_in_context=10,
+            max_tokens=200,
+            temperature=0.1
+        )
+        logging.info(f"Starting rollout for task: {task_spec}")
+        try:
+            run_cua_rollout(
+                task_spec=task_spec,
+                rollout=rollout,
+                runtime=self._runtime,
+                max_steps=20,
+            )
+            logging.info(f"Rollout {rollout_id} completed")
+
+            # Save rollout
+            result = RolloutResult(rollout_id, task_spec, rollout.progress, None)
+            rollout.save(f"rollout_{rollout_id:03d}.json")
+            return result
+
+        except Exception as e:
+            logging.error(f"Rollout {rollout_id} was stopped due to an error: {e}")
+            return RolloutResult(rollout_id, task_spec, rollout.progress, e)
+```
+
+As we can see, the rollout worker simply wraps the rollout logic we created earlier. Now we are ready to run:
+
+```python
+from ui_rl import run_rollouts, FixedStrategy
+
+# Rollout strategy for running our SimpleDataEntry task once for rows 2, 3 and 4
+strategy = FixedStrategy(
+    tasks=[SimpleDataEntryTaskSpec(rows=[i]) for i in range(2, 5)]
+)
+
+# Create rollout worker
+worker = SimpleDataEntryRolloutWorker()
+
+# Run
+run_rollouts(
+    strategy=strategy,
+    rollout_worker=worker,
+    max_parallel=3
 )
 ```
