@@ -1,9 +1,15 @@
-# Task: Simple Data Entry
+# Example project: Simple Data Entry
 
-Desktop level task with two opened browser windows side-by-side, a Google Sheet with some data on the left and a Google Form on the right.
-The task is to submit data from the spreadsheet into the form.
+This project showcases how `ui-rl` can be used to fine-tune a Computer Use model to perfect a desktop-level UI task. This includes:
 
-```bash
-# Example: Launch RL training
-uv run launch_rl_loop.py --mount "$(readlink -f ../../)/data/checkpoints:/app/models" --lora-path "/app/models/20251227_000659/step_21000"
-```
+1. Constructing a containerized ephemeral task environment, see [env/](env/)
+2. How to generate rollouts in the environment from a Computer Use model to evaluate its performance and success rate
+3. How to improve model performance via Supervised Fine-Tuning (SFT) and Data Augmentation
+4. How to further improve model performance via Reinforcement Learning from Verified Reward (RLVR)
+
+`Simple Data Entry` is a desktop-level task with two opened browser windows side-by-side: A Google Sheet with some tabular data on the left and a Google Form on the right.
+The task is to copy-paste some data (typically a specific row) from the spreadsheet into the form window, and then submit the form.
+
+screenshot
+
+

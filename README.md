@@ -17,7 +17,7 @@ The best way to achieve such high reliability is to do task-specific fine-tuning
 
 However, performing such fine-tuning is complex. A typical pipeline consists of starting from an open source model, performing some Supervised Fine-Tuning (SFT) until a decent success rate is achieved, and finally use Reinforcement Learning from Verified Reward (RLVR) for the last-mile performance boost.
 
-Getting all this up-and-running requires significant setup, and is where `ui-rl` aims to simplify"."
+Getting all this up-and-running requires significant setup, and is where `ui-rl` aims to simplify.
 
 
 ## Key features
