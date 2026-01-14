@@ -3,7 +3,7 @@
 Here we show how to set up a verifiable UI task environment, to be used for training Computer Use models using `ui-rl`.
 In Simple Data Entry, the task is to copy-paste data from a spreadsheet, to be submitted into a form:  
 
-screenshot
+<img width="1738" height="1082" alt="Screenshot From 2026-01-10 21-14-04" src="https://github.com/user-attachments/assets/9ee73171-9e17-4b2d-8496-680546d9d9f6" />
 
 The environment consists of:
 
