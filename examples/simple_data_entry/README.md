@@ -10,6 +10,7 @@ This project showcases how `ui-rl` can be used to fine-tune a Computer Use model
 `Simple Data Entry` is a desktop-level task with two opened browser windows side-by-side: A Google Sheet with some tabular data on the left and a Google Form on the right.
 The task is to copy-paste some data (typically a specific row) from the spreadsheet into the form window, and then submit the form.
 
-screenshot
+<img width="1738" height="1082" alt="Screenshot From 2026-01-10 21-14-04" src="https://github.com/user-attachments/assets/02fea119-5319-4cab-b803-21c87eebaee1" />
+
 
 
