@@ -115,7 +115,7 @@ class UITARS15_ThoughtAugmentedRolloutDataset(IterableDataset):
     Assumes a rollout dict where each assistant message's "text" block is not str, 
     but a list[str] of alternative completions.
 
-    This transform selects from the alternatives a random completion, and computes 
+    This dataset selects, for each completion, a random from the alternatives and computes 
     "prompt_token_ids" and "generated_token_ids" for it
     """
 
@@ -215,3 +215,4 @@ class UITARS15_ThoughtAugmentedRolloutDataset(IterableDataset):
                 spans.append(cls.Span(start, i, role_id))
                 start, role_id = None, None
         return spans
+
