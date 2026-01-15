@@ -1,17 +1,26 @@
 [project]
 name = "ui-rl"
-version = "0.1.0"
-description = "RLVR Finetuning for Computer Use models"
+version = "0.1.1"
+description = "Reinforcement Fine-tuning for Computer Use models"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{name = "Tobias Norlund", email = "tobias@norlund.se"}]
+license = "Apache-2.0"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+urls = { Repository = "https://github.com/TobiasNorlund/ui-rl", Issues = "https://github.com/TobiasNorlund/ui-rl/issues" }
 
 dependencies = [
     "docker>=7.1.0",
     "httpx>=0.28.1",
     "kubernetes>=34.1.0",
     "pillow>=11.3.0",
-    "torch<2.9",
+    "torch>=2.8",
     "torchvision>=0.23.0",
     "tqdm>=4.67.1",
     "transformers>=4.57.3",

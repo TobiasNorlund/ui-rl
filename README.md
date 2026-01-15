@@ -1,5 +1,5 @@
 <div align="center">
-    <img alt="ui-rl: Reinforcement Fine-tuning for Computer Use models" src="assets/uirl.svg">
+    <img alt="ui-rl: Reinforcement Fine-tuning for Computer Use models" src="https://github.com/TobiasNorlund/ui-rl/raw/refs/heads/main/assets/uirl.svg">
 </div>
 
 ---
@@ -41,7 +41,7 @@ We exemplify usage of `ui-rl` via common use cases:
 
 ### Use Case: Generate a rollout for a custom UI task
 
-1. Start by building a containerized task environment. For an example, see [examples/simple_data_entry/env](examples/simple_data_entry/env) or [this blog post](https://medium.com/@tobias.norlund/does-computer-use-actually-make-sense-60f0449e3770) for a thorough walkthrough
+1. Start by building a containerized task environment. For an example, see [examples/simple_data_entry/env](https://github.com/TobiasNorlund/ui-rl/tree/main/examples/simple_data_entry/env)
 2. Implement a `TaskSpec` that specifies the task prompt, and how to run it using a so called `SessionRuntime` (local docker container in this case).  
 
 ```python

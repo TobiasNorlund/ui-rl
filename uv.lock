@@ -3188,7 +3188,7 @@ wheels = [
 
 [[package]]
 name = "ui-rl"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "docker" },
@@ -3214,7 +3214,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "kubernetes", specifier = ">=34.1.0" },
     { name = "pillow", specifier = ">=11.3.0" },
-    { name = "torch", specifier = "<2.9" },
+    { name = "torch", specifier = ">=2.8" },
     { name = "torchvision", specifier = ">=0.23.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "transformers", specifier = ">=4.57.3" },
