@@ -1,0 +1,39 @@
+model_name: "ByteDance-Seed/UI-TARS-1.5-7B"
+learning_rate: 1e-4
+eval_checkpoint_steps: 1000
+accelerate_kwargs:
+  gradient_accumulation_steps: 8
+
+train_rollouts:
+- ../../data/rollouts/20260118_101808/row_002_success_0054.json
+- ../../data/rollouts/20260118_101808/row_002_success_0127.json
+- ../../data/rollouts/20260118_101808/row_002_success_0136.json
+- ../../data/rollouts/20260118_101808/row_002_success_0140.json
+- ../../data/rollouts/20260118_101808/row_003_success_0040.json
+- ../../data/rollouts/20260118_101808/row_003_success_0116.json
+- ../../data/rollouts/20260118_101808/row_003_success_0142.json
+- ../../data/rollouts/20260118_101808/row_003_success_0144.json
+- ../../data/rollouts/20260118_101808/row_003_success_0155.json
+- ../../data/rollouts/20260118_101808/row_003_success_0157.json
+- ../../data/rollouts/20260118_101808/row_004_success_0065.json
+- ../../data/rollouts/20260118_101808/row_004_success_0126.json
+- ../../data/rollouts/20260118_101808/row_004_success_0163.json
+- ../../data/rollouts/20260118_101808/row_004_success_0165.json
+- ../../data/rollouts/20260118_101808/row_004_success_0170.json
+- ../../data/rollouts/20260118_101808/row_005_success_0081.json
+- ../../data/rollouts/20260118_101808/row_005_success_0085.json
+- ../../data/rollouts/20260118_101808/row_005_success_0086.json
+- ../../data/rollouts/20260118_101808/row_005_success_0093.json
+- ../../data/rollouts/20260118_101808/row_006_success_0024.json
+- ../../data/rollouts/20260118_101808/row_006_success_0101.json
+- ../../data/rollouts/20260118_101808/row_006_success_0103.json
+- ../../data/rollouts/20260118_101808/row_006_success_0105.json
+- ../../data/rollouts/20260118_101808/row_006_success_0109.json
+- ../../data/rollouts/20260118_101808/row_006_success_0111.json
+
+test_rollouts:
+- ../../data/rollouts/20260118_101808/row_002_success_0001.json
+- ../../data/rollouts/20260118_101808/row_003_success_0034.json
+- ../../data/rollouts/20260118_101808/row_004_success_0026.json
+- ../../data/rollouts/20260118_101808/row_005_success_0027.json
+- ../../data/rollouts/20260118_101808/row_006_success_0005.json
