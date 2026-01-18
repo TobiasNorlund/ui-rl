@@ -1,6 +1,6 @@
 model_name: "ByteDance-Seed/UI-TARS-1.5-7B"
 learning_rate: 1e-4
-eval_checkpoint_steps: 1000
+eval_checkpoint_steps: 250
 accelerate_kwargs:
   gradient_accumulation_steps: 8
 

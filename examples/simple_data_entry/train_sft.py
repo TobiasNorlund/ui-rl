@@ -13,8 +13,7 @@ import random
 import os
 from datetime import datetime
 
-from ui_rl.models.uitars15.dataset import UITARS15_RolloutDataset, UITARS15_ThoughtAugmentedRolloutDataset
-from utils import Qwen2_5_VLCollate
+from ui_rl.models.uitars15.dataset import UITARS15_RolloutDataset, UITARS15_ThoughtAugmentedRolloutDataset, Qwen2_5_VLCollate
 
 
 class TrainConfig(BaseModel):
