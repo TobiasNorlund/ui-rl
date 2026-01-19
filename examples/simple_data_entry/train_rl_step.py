@@ -7,8 +7,7 @@ from peft import LoraConfig, get_peft_model, PeftModel
 from tqdm import tqdm
 from pydantic import BaseModel
 import os
-from ui_rl.models.uitars15.dataset import UITARS15_RolloutDataset
-from utils import Qwen2_5_VLCollate
+from ui_rl.models.uitars15.dataset import UITARS15_RolloutDataset, Qwen2_5_VLCollate
 
 
 class TrainConfig(BaseModel):
@@ -58,7 +57,7 @@ def main(config_file: str):
         lora_config = LoraConfig(
             r=64,
             lora_alpha=64,
-            target_modules=["q_proj", "v_proj"],
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "gate_proj", "down_proj"],
             lora_dropout=0.0,
             bias="none",
             task_type="CAUSAL_LM"

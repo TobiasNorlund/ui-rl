@@ -9,9 +9,9 @@ import shutil
 import random
 import wandb
 
-from ui_rl.runner import FixedStrategy, NSuccessfulStrategy, run_rollouts
+from ui_rl.runner import FixedStrategy, run_rollouts
 from generate_rollouts import SimpleDataEntryRolloutWorker
-from simple_data_entry import SimpleDataEntryTaskSpec, rows_submitted_correctly
+from simple_data_entry import SimpleDataEntryTaskSpec
 from launch_vllm import launch as launch_vllm, get_gpu_count, await_vllm_ready, DEFAULT_VLLM_ARGS, DEFAULT_VLLM_MOUNTS
 from utils import get_rollout_result
 
@@ -21,7 +21,6 @@ def main(
     max_rollout_steps: int,
     rollout_output_dir: Path,
     checkpoint_output_dir: Path,
-    eval_every_n_step: int,
     lora_path: str | None = None,
     mounts: list[str] = DEFAULT_VLLM_MOUNTS, 
     vllm_args: list[str] = DEFAULT_VLLM_ARGS
@@ -120,9 +119,8 @@ def main(
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--max-parallel-rollouts", type=int, default=20)
-    parser.add_argument("--lora-path", default=None)
-    parser.add_argument("--eval-every", type=int, default=5)
+    parser.add_argument("--max-parallel-rollouts", type=int, default=15)
+    parser.add_argument("--checkpoint-dir", type=Path, required=True)
     parser.add_argument("--mount", nargs="+", default=[])
     args, vllm_args = parser.parse_known_args()
 
@@ -130,9 +128,8 @@ if __name__ == "__main__":
         max_parallel_rollouts=args.max_parallel_rollouts,
         max_rollout_steps=20,
         rollout_output_dir=Path("/tmp/rollouts"),
-        checkpoint_output_dir=Path("/tmp/checkpoint"),
-        eval_every_n_step=args.eval_every,
-        lora_path=args.lora_path,
+        checkpoint_output_dir=args.checkpoint_dir,
+        lora_path=args.checkpoint_dir,
         mounts=DEFAULT_VLLM_MOUNTS + args.mount,
         vllm_args=DEFAULT_VLLM_ARGS + vllm_args
     )
