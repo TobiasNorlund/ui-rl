@@ -4,7 +4,9 @@
 
 ---
 
-[![Build](https://github.com/TobiasNorlund/ui-rl/actions/workflows/ci.yml/badge.svg)](https://github.com/TobiasNorlund/ui-rl/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Build](https://github.com/TobiasNorlund/ui-rl/actions/workflows/ci.yml/badge.svg)](https://github.com/TobiasNorlund/ui-rl/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![pip](https://img.shields.io/pypi/v/torchtitan?color=blue)](https://pypi.org/project/torchtitan/)
 
 `ui-rl` is a **framework for fine-tuning Computer Use agent models**.
 It provides utilities for scalable training on verifiable UI tasks to improve model reliability on targeted domains and tasks.
