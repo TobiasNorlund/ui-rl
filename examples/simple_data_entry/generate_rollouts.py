@@ -34,7 +34,7 @@ def main(
     logging.info(f"Starting generation of rollouts from model '{model_name}', using {max_parallel} parallel workers")
     logging.info(f"Logs will be saved to: {output_dir}")
 
-    wandb.init(project="ui-rl", config={
+    wandb.init(project="ui-rl", group="generate_rollouts", config={
         "model_name": model_name,
         "max_parallel": max_parallel,
         "max_steps": max_steps,
@@ -70,7 +70,10 @@ def main(
         data=[[row, n_success[row] / n_tot[row]] for row in n_tot.keys()],
         columns=["row", "success rate"]
     )
-    wandb.log({"result": wandb.plot.bar(table, "row", "success rate", title="Success Rate")})
+    wandb.log({
+        "result": wandb.plot.bar(table, "row", "success rate", title="Success Rate"),
+        "avg_success_rate": sum(n_success[row] / n_tot[row] for row in n_tot.keys()) / len(n_tot)
+    })
     wandb.finish()
             
 
