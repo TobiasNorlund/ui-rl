@@ -38,7 +38,14 @@ pip install ui-rl
 
 ## How to use:
 
-We exemplify usage of `ui-rl` via common use cases:
+How to use `ui-rl` be used in practice? In the following blog series, we show how `ui-rl` can be used to fine-tune the [UITARS 1.5 7B](https://huggingface.co/ByteDance-Seed/UI-TARS-1.5-7B) model to _nail_ a custom UI task, going from 20% success rate all the way to 100%.
+
+ - [Part 1 — Setting Up a Scalable CUA Gym](https://medium.com/@tobias.norlund/reinforcement-fine-tuning-for-computer-use-part-1-setting-up-a-scalable-cua-gym-e2e99674acc2)
+ - [Part 2 — Implementing the Agent and Generating Rollouts](https://medium.com/@tobias.norlund/reinforcement-fine-tuning-for-computer-use-part-2-implementing-the-agent-and-generating-rollouts-401b0813f688)
+ - [Part 3 — Cold Starting with Supervised Fine-tuning](https://medium.com/@tobias.norlund/reinforcement-fine-tuning-for-computer-use-part-3-cold-starting-with-supervised-fine-tuning-4088934ff4a3)
+ - [Part 4 — Reaching 100% success rate with RLVR and Policy Gradient](https://medium.com/@tobias.norlund/reinforcement-fine-tuning-for-computer-use-part-4-reaching-100-success-rate-with-rlvr-and-318f218c6ed8)
+
+In addition, we exemplify usage of `ui-rl` via some common use cases:
 
 
 ### Use Case: Generate a rollout for a custom UI task
